@@ -11,9 +11,9 @@ export const maxDuration = 120;
  *   /api/admin?action=seed&token=...
  *   /api/admin?action=run&job=recompute&token=...
  *   /api/admin?action=run&job=suggestions&token=...
+ *   /api/admin?action=demo&token=...   ← backdate contacts past cadence, draft suggestions
  *
- * Remove this route (and rotate nothing — the token isn't a real credential)
- * once the app has real auth + onboarding wired.
+ * Remove this route once the app has real auth + onboarding wired.
  */
 const TOKEN = "rolodexa-init-7x29qk";
 
@@ -35,8 +35,18 @@ export async function GET(req: Request) {
       await runOnce(job);
       return NextResponse.json({ ok: true, action, job });
     }
+    if (action === "demo") {
+      // Force the contacts past their check-in cadence so the re-engage trigger
+      // fires, then generate suggestions (Claude drafts a real message each).
+      const { db } = await import("@/db");
+      const { contacts } = await import("@/db/schema");
+      await db.update(contacts).set({ lastContactedAt: new Date(Date.now() - 60 * 86_400_000) });
+      const { runOnce } = await import("@/worker/scheduler");
+      await runOnce("suggestions");
+      return NextResponse.json({ ok: true, action, note: "backdated contacts 60d + generated suggestions" });
+    }
     return NextResponse.json(
-      { ok: false, error: "unknown action; use ?action=seed or ?action=run&job=recompute|suggestions" },
+      { ok: false, error: "unknown action; use seed | run&job=... | demo" },
       { status: 400 },
     );
   } catch (e) {
