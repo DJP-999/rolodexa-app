@@ -1,0 +1,29 @@
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+
+# next
+/.next/
+/out/
+next-env.d.ts
+
+# production
+/build
+
+# env & secrets — never commit
+.env
+.env.local
+.env*.local
+
+# logs
+*.log
+npm-debug.log*
+
+# misc
+.DS_Store
+*.pem
+.vercel
+.idea
+.vscode
+/coverage

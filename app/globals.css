@@ -1,0 +1,22 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+@layer components {
+  .card {
+    @apply rounded-xl border border-hairline bg-white p-5;
+  }
+  .navlink {
+    @apply flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-muted transition-colors hover:bg-surface;
+  }
+  .navlink-active {
+    @apply bg-surface font-medium text-ink;
+  }
+  .chip {
+    @apply inline-flex items-center rounded-full bg-surface px-2 py-0.5 text-xs text-muted;
+  }
+}
