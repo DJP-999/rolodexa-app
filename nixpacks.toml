@@ -1,0 +1,12 @@
+# Explicit Nixpacks build plan — pins Node 20 and forces dev deps for `next build`.
+# (Railway sets NODE_ENV=production, which would otherwise skip devDependencies
+#  like typescript/tailwind that the build needs.)
+
+[phases.setup]
+nixPkgs = ["nodejs_20"]
+
+[phases.install]
+cmds = ["npm install --include=dev"]
+
+[phases.build]
+cmds = ["npm run build"]
