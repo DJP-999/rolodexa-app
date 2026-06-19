@@ -1,40 +1,23 @@
-import Link from "next/link";
 import type { ReactNode } from "react";
-
-const NAV = [
-  ["Home", "/dashboard"],
-  ["Contacts", "/dashboard/contacts"],
-  ["Projects", "/dashboard/projects"],
-  ["Suggestions", "/dashboard/suggestions"],
-  ["Automations", "/dashboard/automations"],
-  ["Settings", "/dashboard/settings"],
-];
+import { ChevronDown } from "lucide-react";
+import { Sidebar } from "@/components/Sidebar";
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   return (
-    <div className="flex min-h-screen">
-      <aside className="w-64 shrink-0 border-r border-hairline bg-canvas px-3 py-5">
-        <div className="flex items-center gap-2 px-3 pb-6">
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-ink text-xs font-bold text-white">
-            R
-          </div>
-          <span className="font-semibold">Rolodexa</span>
+    <div className="flex min-h-screen bg-[#ececee] p-2">
+      <Sidebar />
+      <main className="dotted-bg relative flex-1 overflow-hidden rounded-panel bg-white shadow-sm ring-1 ring-black/[0.04]">
+        <div className="absolute right-5 top-5 z-10">
+          <button className="flex items-center gap-2 rounded-full bg-black py-1.5 pl-3 pr-1.5 text-sm font-medium text-white">
+            <ChevronDown className="h-4 w-4 opacity-60" />
+            Dominick
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-amber-400 to-orange-500 text-[11px] font-bold text-white">
+              DP
+            </span>
+          </button>
         </div>
-        <nav className="space-y-1">
-          {NAV.map(([label, href]) => (
-            <Link key={href} href={href} className="navlink">
-              {label}
-            </Link>
-          ))}
-        </nav>
-        <div className="mt-6 border-t border-hairline px-3 pt-4 text-xs uppercase tracking-wide text-muted">
-          Chats
-        </div>
-        <div className="navlink mt-1">
-          iMessage <span className="chip ml-auto">PHONE</span>
-        </div>
-      </aside>
-      <main className="flex-1 bg-surface/40 p-8">{children}</main>
+        <div className="h-[calc(100vh-1rem)] overflow-y-auto px-10 py-9">{children}</div>
+      </main>
     </div>
   );
 }

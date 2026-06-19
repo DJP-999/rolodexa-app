@@ -6,8 +6,8 @@ export default {
     extend: {
       colors: {
         ink: "#111111",
-        canvas: "#ffffff",
-        surface: "#f6f6f7",
+        canvas: "#f7f7f8",
+        surface: "#f1f1f3",
         hairline: "#e8e8ea",
         muted: "#8a8a8e",
         hot: "#ef4444",
@@ -17,9 +17,17 @@ export default {
         dexa: "#3b82f6",
       },
       fontFamily: {
-        sans: ["Inter", "Helvetica Neue", "Arial", "system-ui", "sans-serif"],
+        // Match the original exactly.
+        sans: [
+          "Helvetica Now Display",
+          "Helvetica Neue",
+          "Helvetica",
+          "Arial",
+          "system-ui",
+          "sans-serif",
+        ],
       },
-      borderRadius: { xl2: "1rem" },
+      borderRadius: { panel: "28px" },
     },
   },
   plugins: [],

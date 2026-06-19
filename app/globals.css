@@ -6,17 +6,28 @@
   color-scheme: light;
 }
 
+body {
+  background: #ececee;
+}
+
 @layer components {
-  .card {
-    @apply rounded-xl border border-hairline bg-white p-5;
+  /* exact dotted pattern from the original dashboard */
+  .dotted-bg {
+    background-image: radial-gradient(circle, rgba(0, 0, 0, 0.22) 1px, rgba(0, 0, 0, 0) 1.4px);
+    background-size: 20px 20px;
+    background-position: 0 0;
   }
+
   .navlink {
-    @apply flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-muted transition-colors hover:bg-surface;
+    @apply flex items-center gap-3 rounded-xl px-3 py-2.5 text-[15px] text-muted transition-colors hover:bg-black/[0.03];
   }
   .navlink-active {
-    @apply bg-surface font-medium text-ink;
+    @apply bg-black/[0.05] font-medium text-ink;
+  }
+  .card {
+    @apply rounded-2xl border border-hairline bg-white p-5;
   }
   .chip {
-    @apply inline-flex items-center rounded-full bg-surface px-2 py-0.5 text-xs text-muted;
+    @apply inline-flex items-center rounded-full bg-black/[0.05] px-2 py-0.5 text-[11px] font-medium tracking-wide text-muted;
   }
 }
