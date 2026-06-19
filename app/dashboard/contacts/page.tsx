@@ -1,13 +1,15 @@
+import { Suspense } from "react";
 import { desc } from "drizzle-orm";
-import { Search, SlidersHorizontal } from "lucide-react";
 import { db } from "@/db";
 import { contacts, type Contact } from "@/db/schema";
+import { ContactControls } from "./ContactControls";
+import { ContactsFilters } from "./ContactsFilters";
 
 export const dynamic = "force-dynamic";
 
 async function getContacts() {
   try {
-    return await db.select().from(contacts).orderBy(desc(contacts.relevance)).limit(200);
+    return await db.select().from(contacts).orderBy(desc(contacts.relevance)).limit(500);
   } catch {
     return null;
   }
@@ -44,47 +46,86 @@ function Cell({ children }: { children: React.ReactNode }) {
   return <td className="px-3 py-3.5 align-top text-[13px] text-muted">{children}</td>;
 }
 
-export default async function ContactsPage() {
-  const rows = await getContacts();
-  const enriched = rows?.filter((c) => c.enrichedAt).length ?? 0;
+export default async function ContactsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{
+    q?: string;
+    rel?: string;
+    tab?: string;
+    imported?: string;
+    added?: string;
+    error?: string;
+  }>;
+}) {
+  const sp = await searchParams;
+  const all = await getContacts();
+  const enriched = all?.filter((c) => c.enrichedAt).length ?? 0;
+
+  const q = (sp.q ?? "").toLowerCase();
+  const rel = sp.rel ?? "";
+  const tab = sp.tab ?? "";
+
+  const rows = (all ?? []).filter((c) => {
+    if (q) {
+      const hay = `${c.name} ${c.company ?? ""} ${c.role ?? ""} ${c.email ?? ""} ${
+        c.industry ?? ""
+      }`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    if (rel && (c.relationship ?? "other") !== rel) return false;
+    if (tab === "enriched" && !c.enrichedAt) return false;
+    if (tab === "needs" && c.relevance != null) return false;
+    return true;
+  });
+
+  const banner =
+    sp.error != null
+      ? `Import failed: ${
+          sp.error === "noheader"
+            ? "couldn't find a header row — your CSV needs a Name or Email column."
+            : sp.error === "nofile"
+              ? "no file selected."
+              : sp.error === "noname"
+                ? "a name is required."
+                : sp.error
+        }`
+      : sp.imported != null
+        ? `Imported ${sp.imported} new contact${sp.imported === "1" ? "" : "s"} and re-graded your network.`
+        : sp.added
+          ? "Contact added and your network re-graded."
+          : null;
 
   return (
     <div className="mx-auto max-w-6xl">
-      <h1 className="text-[28px] font-bold tracking-tight">Contacts</h1>
-      <p className="mt-1 text-sm text-muted">{rows?.length ?? 0} contacts</p>
-
-      {/* search + category filters */}
-      <div className="mt-5 flex flex-wrap items-center gap-4">
-        <div className="flex w-[340px] items-center gap-2 rounded-xl border border-hairline bg-white px-3 py-2.5">
-          <Search className="h-4 w-4 text-muted" />
-          <input
-            placeholder="Search contacts..."
-            className="w-full bg-transparent text-sm outline-none placeholder:text-muted"
-          />
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-[28px] font-bold tracking-tight">Contacts</h1>
+          <p className="mt-1 text-sm text-muted">{all?.length ?? 0} contacts</p>
         </div>
-        <SlidersHorizontal className="h-4 w-4 text-muted" />
-        <div className="flex items-center gap-1 text-sm">
-          <span className="rounded-full bg-black px-3 py-1 font-medium text-white">All</span>
-          {["Coworker", "Friend", "Investor", "Other", "Vendor"].map((c) => (
-            <span key={c} className="cursor-pointer rounded-full px-3 py-1 text-muted hover:text-ink">
-              {c}
-            </span>
-          ))}
-        </div>
+        <ContactControls />
       </div>
 
-      {/* status tabs */}
-      <div className="mt-4 flex items-center gap-1 text-sm">
-        <span className="rounded-full bg-black px-3 py-1 font-medium text-white">All</span>
-        <span className="flex items-center gap-1.5 rounded-full px-3 py-1 text-muted">
-          Enriched <span className="chip">{enriched}</span>
-        </span>
-        <span className="rounded-full px-3 py-1 text-muted">Needs Context</span>
-        <span className="rounded-full px-3 py-1 text-muted">Dismissed</span>
-      </div>
+      {banner && (
+        <div
+          className={`mt-4 rounded-lg px-4 py-2.5 text-sm ${
+            sp.error ? "bg-rose-50 text-rose-700" : "bg-emerald-50 text-emerald-700"
+          }`}
+        >
+          {banner}
+        </div>
+      )}
 
-      {!rows ? (
+      <Suspense fallback={<div className="mt-5 h-[88px]" />}>
+        <ContactsFilters enriched={enriched} />
+      </Suspense>
+
+      {!all ? (
         <p className="mt-8 text-sm text-muted">Connect the database to see contacts.</p>
+      ) : rows.length === 0 ? (
+        <p className="mt-8 text-sm text-muted">
+          No contacts match. Import a CSV or add one to get started.
+        </p>
       ) : (
         <div className="mt-4 overflow-hidden rounded-2xl border border-hairline bg-white">
           <table className="w-full">
