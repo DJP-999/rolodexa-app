@@ -2,9 +2,12 @@ import Link from "next/link";
 import { AlarmClock, Cable, Plus, ArrowUp, Sparkles, Clock } from "lucide-react";
 import { db } from "@/db";
 import { contacts } from "@/db/schema";
-import { DexaMascot } from "@/components/DexaMascot";
 
 export const dynamic = "force-dynamic";
+
+// The exact original mascot. To fully self-host: save this file into /public and
+// change the src to "/dexa-mascot.png".
+const MASCOT_SRC = "https://relationship-buddy.vercel.app/dexa-mascot.png";
 
 async function getStats() {
   try {
@@ -31,16 +34,21 @@ export default async function DashboardHome() {
   const stats = await getStats();
   return (
     <div className="mx-auto max-w-4xl pt-6">
-      {/* Dexa console — mascot overlaps the input card's top-left */}
-      <div className="relative mx-auto max-w-[600px]">
-        <DexaMascot className="pointer-events-none absolute -left-[54px] -top-[42px] h-[124px] w-[124px] drop-shadow-[0_10px_24px_rgba(59,130,246,0.35)]" />
+      {/* Dexa console — mascot overlaps the input card's top-left, sits left of the heading */}
+      <div className="relative mx-auto w-[620px] max-w-full">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={MASCOT_SRC}
+          alt="Dexa"
+          className="pointer-events-none absolute -left-[40px] -top-[16px] h-[120px] w-[120px] select-none object-contain"
+        />
 
-        <div className="pl-[86px]">
+        <div className="pl-[92px]">
           <p className="text-[13px] text-muted">Dexa</p>
           <h1 className="text-[34px] font-bold leading-[1.1] tracking-tight">How can I help?</h1>
         </div>
 
-        <div className="mt-3 flex h-[150px] flex-col rounded-[24px] border border-white/60 bg-[#e9eef0]/60 p-5 shadow-sm">
+        <div className="mt-3 flex h-[150px] flex-col rounded-[24px] border border-white/70 bg-[#e9eef0]/55 p-5 shadow-sm">
           <input
             className="w-full bg-transparent text-[15px] outline-none placeholder:text-muted"
             placeholder="Assign a task or ask anything"
