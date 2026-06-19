@@ -2,6 +2,7 @@ import { desc, eq } from "drizzle-orm";
 import { Sparkles, Check, Clock, X, Pencil } from "lucide-react";
 import { db } from "@/db";
 import { suggestions, contacts } from "@/db/schema";
+import { approveAction, snoozeAction, dismissAction, generateAction } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -43,9 +44,11 @@ export default async function SuggestionsPage() {
             AI-generated outreach opportunities for your network.
           </p>
         </div>
-        <button className="flex items-center gap-2 rounded-lg bg-black px-3.5 py-2 text-sm font-medium text-white">
-          <Sparkles className="h-4 w-4" /> Generate
-        </button>
+        <form action={generateAction}>
+          <button className="flex items-center gap-2 rounded-lg bg-black px-3.5 py-2 text-sm font-medium text-white hover:bg-black/90">
+            <Sparkles className="h-4 w-4" /> Generate
+          </button>
+        </form>
       </div>
 
       <div className="mt-5 flex items-center gap-1 text-sm">
@@ -109,15 +112,24 @@ export default async function SuggestionsPage() {
                 )}
 
                 <div className="mt-3 flex items-center gap-2 text-sm">
-                  <button className="flex items-center gap-1.5 rounded-lg bg-black px-3 py-1.5 font-medium text-white">
-                    <Check className="h-4 w-4" /> Approve
-                  </button>
-                  <button className="flex items-center gap-1.5 rounded-lg border border-hairline px-3 py-1.5">
-                    <Clock className="h-4 w-4" /> Snooze 7d
-                  </button>
-                  <button className="flex items-center gap-1.5 px-3 py-1.5 text-muted">
-                    <X className="h-4 w-4" /> Dismiss
-                  </button>
+                  <form action={approveAction}>
+                    <input type="hidden" name="id" value={s.id} />
+                    <button className="flex items-center gap-1.5 rounded-lg bg-black px-3 py-1.5 font-medium text-white hover:bg-black/90">
+                      <Check className="h-4 w-4" /> Approve
+                    </button>
+                  </form>
+                  <form action={snoozeAction}>
+                    <input type="hidden" name="id" value={s.id} />
+                    <button className="flex items-center gap-1.5 rounded-lg border border-hairline px-3 py-1.5 hover:bg-black/[0.03]">
+                      <Clock className="h-4 w-4" /> Snooze 7d
+                    </button>
+                  </form>
+                  <form action={dismissAction}>
+                    <input type="hidden" name="id" value={s.id} />
+                    <button className="flex items-center gap-1.5 px-3 py-1.5 text-muted hover:text-ink">
+                      <X className="h-4 w-4" /> Dismiss
+                    </button>
+                  </form>
                   <span className="ml-auto text-xs text-muted">{s.intentLabel}</span>
                 </div>
               </div>

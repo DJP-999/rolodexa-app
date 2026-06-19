@@ -1,16 +1,19 @@
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { suggestions, notificationEvents, messageLog } from "@/db/schema";
+import { users, suggestions, notificationEvents, connectedAccounts, messageLog } from "@/db/schema";
 import { env } from "@/lib/env";
-import { answerCallback } from "@/lib/integrations/telegram";
+import { answerCallback, sendMessage } from "@/lib/integrations/telegram";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Telegram webhook. Captures tappable approvals → suggestion status + the
- * outcome that feeds the nightly learning loop. Also logs inbound chat.
- * Approval callback_data format: "<action>:<suggestionId>" (approve|snooze|dismiss).
+ * Telegram webhook.
+ *  - On a message: link the sender's chat to the (single) user by upserting
+ *    connected_accounts(provider='telegram'), so briefs + approved suggestions
+ *    deliver here. Replies with a confirmation.
+ *  - On a tappable approval (callback_data "<action>:<suggestionId>"): update the
+ *    suggestion + log the outcome to the feedback loop.
  */
 export async function POST(req: Request) {
   if (
@@ -40,25 +43,55 @@ export async function POST(req: Request) {
       if (outcome && suggestionId) {
         await db
           .update(suggestions)
-          .set({ status: outcome === "approved" ? "approved" : outcome === "snoozed" ? "snoozed" : "dismissed", updatedAt: new Date() })
+          .set({ status: outcome === "approved" ? "sent" : outcome, updatedAt: new Date() })
           .where(eq(suggestions.id, suggestionId));
         await db
           .update(notificationEvents)
           .set({ outcome, outcomeAt: new Date() })
           .where(eq(notificationEvents.suggestionId, suggestionId));
       }
-      await answerCallback(cb.id, "Got it.");
-    } else if (body.message) {
-      const chatId = body.message.chat?.id;
-      const text = body.message.text ?? "";
-      // Best-effort inbound log; user resolution by chat id arrives in Phase 1.
-      if (chatId) {
-        await db.insert(messageLog).values({
-          userId: chatId.toString().length ? chatId.toString() : "00000000-0000-0000-0000-000000000000",
-          direction: "inbound",
-          channel: "telegram",
-          text,
-        }).catch(() => undefined);
+      await answerCallback(cb.id, "Got it ✓");
+      return NextResponse.json({ ok: true });
+    }
+
+    const message = body.message;
+    if (message?.chat?.id) {
+      const chatId = String(message.chat.id);
+      const user = (await db.select().from(users).limit(1))[0];
+      if (user) {
+        const existing = (
+          await db
+            .select()
+            .from(connectedAccounts)
+            .where(
+              and(
+                eq(connectedAccounts.userId, user.id),
+                eq(connectedAccounts.provider, "telegram"),
+              ),
+            )
+            .limit(1)
+        )[0];
+        if (!existing) {
+          await db.insert(connectedAccounts).values({
+            userId: user.id,
+            provider: "telegram",
+            externalId: chatId,
+            metadata: { username: message.from?.username ?? null },
+          });
+          await sendMessage(
+            chatId,
+            "✅ Connected to Rolodexa. Your morning, midday and night briefs — and any outreach you approve — will arrive here.",
+          );
+        }
+        await db
+          .insert(messageLog)
+          .values({
+            userId: user.id,
+            direction: "inbound",
+            channel: "telegram",
+            text: message.text ?? "",
+          })
+          .catch(() => undefined);
       }
     }
   } catch (err) {
