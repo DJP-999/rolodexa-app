@@ -2,6 +2,7 @@ import Link from "next/link";
 import { AlarmClock, Cable, Plus, ArrowUp, Sparkles, Clock } from "lucide-react";
 import { db } from "@/db";
 import { contacts } from "@/db/schema";
+import { DexaMascot } from "@/components/DexaMascot";
 
 export const dynamic = "force-dynamic";
 
@@ -29,50 +30,46 @@ const AUTOMATIONS = [
 export default async function DashboardHome() {
   const stats = await getStats();
   return (
-    <div className="mx-auto max-w-5xl">
-      {/* Dexa console */}
-      <div className="flex items-start gap-3">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src="https://relationship-buddy.vercel.app/dexa-mascot.png"
-          alt="Dexa"
-          className="-mt-2 h-28 w-28 shrink-0 object-contain"
-        />
-        <div className="min-w-0 flex-1">
-          <p className="text-sm text-muted">Dexa</p>
-          <h1 className="text-[40px] font-bold leading-tight tracking-tight">How can I help?</h1>
+    <div className="mx-auto max-w-4xl pt-6">
+      {/* Dexa console — mascot overlaps the input card's top-left */}
+      <div className="relative mx-auto max-w-[600px]">
+        <DexaMascot className="pointer-events-none absolute -left-[54px] -top-[42px] h-[124px] w-[124px] drop-shadow-[0_10px_24px_rgba(59,130,246,0.35)]" />
 
-          <div className="mt-4 rounded-3xl border border-black/[0.06] bg-white/60 p-4 shadow-sm">
-            <input
-              className="w-full bg-transparent px-1 text-[15px] outline-none placeholder:text-muted"
-              placeholder="Assign a task or ask anything"
-            />
-            <div className="mt-7 flex items-center justify-between">
-              <button className="flex h-8 w-8 items-center justify-center rounded-full text-muted transition-colors hover:bg-black/[0.04]">
-                <Plus className="h-5 w-5" strokeWidth={2} />
-              </button>
-              <button className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-100 text-blue-600 transition-colors hover:bg-blue-200">
-                <ArrowUp className="h-5 w-5" strokeWidth={2.25} />
-              </button>
-            </div>
-          </div>
-
-          {stats && (
-            <div className="mt-4 flex items-center gap-3 text-sm">
-              <span>
-                <b>{stats.total}</b> <span className="text-muted">Contacts</span>
-              </span>
-              <span className="text-hairline">|</span>
-              <span>
-                <b>{stats.avg}</b> <span className="text-muted">Avg relationship score</span>
-              </span>
-              <span className="text-hairline">|</span>
-              <span>
-                <b>{stats.enrichedPct}%</b> <span className="text-muted">Enriched</span>
-              </span>
-            </div>
-          )}
+        <div className="pl-[86px]">
+          <p className="text-[13px] text-muted">Dexa</p>
+          <h1 className="text-[34px] font-bold leading-[1.1] tracking-tight">How can I help?</h1>
         </div>
+
+        <div className="mt-3 flex h-[150px] flex-col rounded-[24px] border border-white/60 bg-[#e9eef0]/60 p-5 shadow-sm">
+          <input
+            className="w-full bg-transparent text-[15px] outline-none placeholder:text-muted"
+            placeholder="Assign a task or ask anything"
+          />
+          <div className="mt-auto flex items-center justify-between">
+            <button className="flex h-7 w-7 items-center justify-center rounded-full text-muted transition-colors hover:bg-black/[0.04]">
+              <Plus className="h-5 w-5" strokeWidth={1.75} />
+            </button>
+            <button className="flex h-9 w-9 items-center justify-center rounded-full bg-[#cfe0fb] text-[#2d6cf6] transition-colors hover:bg-[#bcd4fa]">
+              <ArrowUp className="h-[18px] w-[18px]" strokeWidth={2.25} />
+            </button>
+          </div>
+        </div>
+
+        {stats && (
+          <div className="mt-4 flex items-center gap-3 text-sm">
+            <span>
+              <b>{stats.total}</b> <span className="text-muted">Contacts</span>
+            </span>
+            <span className="text-hairline">|</span>
+            <span>
+              <b>{stats.avg}</b> <span className="text-muted">Avg relationship score</span>
+            </span>
+            <span className="text-hairline">|</span>
+            <span>
+              <b>{stats.enrichedPct}%</b> <span className="text-muted">Enriched</span>
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Automations */}
