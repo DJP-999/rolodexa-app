@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { desc } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { db } from "@/db";
 import { contacts, type Contact } from "@/db/schema";
 import { ContactControls } from "./ContactControls";
@@ -9,7 +9,11 @@ export const dynamic = "force-dynamic";
 
 async function getContacts() {
   try {
-    return await db.select().from(contacts).orderBy(desc(contacts.relevance)).limit(500);
+    return await db
+      .select()
+      .from(contacts)
+      .orderBy(sql`${contacts.highValue} desc nulls last, ${contacts.relevance} desc nulls last`)
+      .limit(500);
   } catch {
     return null;
   }

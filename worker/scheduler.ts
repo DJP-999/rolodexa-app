@@ -1,5 +1,8 @@
 import { Queue, Worker } from "bullmq";
 import IORedis from "ioredis";
+import { eq } from "drizzle-orm";
+import { db } from "@/db";
+import { jobRuns } from "@/db/schema";
 import { env } from "@/lib/env";
 import { runEmailPoll } from "./jobs/emailPoll";
 import { runEnrichment } from "./jobs/enrichment";
@@ -29,6 +32,34 @@ export const JOBS: JobDef[] = [
 ];
 
 export const byName = new Map(JOBS.map((j) => [j.name, j.run]));
+
+/** Record a job execution to job_runs so the home activity feed can show it. */
+async function recordRun(name: string, fn: () => Promise<void>): Promise<void> {
+  let id: string | undefined;
+  try {
+    const row = (
+      await db.insert(jobRuns).values({ name, status: "running" }).returning({ id: jobRuns.id })
+    )[0];
+    id = row?.id;
+  } catch (e) {
+    console.error("[scheduler] jobRuns insert failed", e);
+  }
+  try {
+    await fn();
+    if (id)
+      await db
+        .update(jobRuns)
+        .set({ status: "done", finishedAt: new Date() })
+        .where(eq(jobRuns.id, id));
+  } catch (e) {
+    if (id)
+      await db
+        .update(jobRuns)
+        .set({ status: "failed", finishedAt: new Date(), detail: { error: String(e) } })
+        .where(eq(jobRuns.id, id));
+    throw e;
+  }
+}
 
 let connection: IORedis | null = null;
 let queue: Queue | null = null;
@@ -73,7 +104,7 @@ export async function startScheduler(): Promise<void> {
         const run = byName.get(job.name);
         if (!run) return;
         console.log(`[scheduler] running ${job.name}`);
-        await run();
+        await recordRun(job.name, run);
       },
       { connection: c },
     );
@@ -108,5 +139,5 @@ export async function runOnce(name: string): Promise<void> {
     return;
   }
   console.log(`[scheduler] manual run: ${name}`);
-  await run();
+  await recordRun(name, run);
 }

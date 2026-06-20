@@ -2,6 +2,7 @@ import Link from "next/link";
 import { AlarmClock, Cable, Plus, ArrowUp, Sparkles, Clock } from "lucide-react";
 import { db } from "@/db";
 import { contacts } from "@/db/schema";
+import { ActivityPanel } from "@/components/ActivityPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -79,6 +80,9 @@ export default async function DashboardHome() {
           </div>
         )}
       </div>
+
+      {/* Activity — live enrichment progress + recent jobs */}
+      <ActivityPanel />
 
       {/* Automations */}
       <div className="mt-12 flex items-center gap-2.5">
