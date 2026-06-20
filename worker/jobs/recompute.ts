@@ -23,6 +23,7 @@ type Ctx = {
   currentFocus: string | null;
   activeProjects: string | null;
   priorityConnections: string | null;
+  weights?: Record<string, number> | null;
 } | null;
 
 function tokenize(s: string): string[] {
@@ -96,8 +97,19 @@ export async function runRecompute(): Promise<void> {
     const rp = scoreReplyPropensity(f);
     const cadence = cadenceForRelevance(c.relevance ?? null);
     const prof = professionalSignal(c, ctx);
+    const w = ctx?.weights;
+    const weights: Weights = w
+      ? {
+          professional: w.professional ?? 30,
+          recency: w.recency ?? 25,
+          relationship: w.relationship ?? 20,
+          geographic: w.geographic ?? 15,
+          trigger: w.trigger ?? 0,
+          replyPropensity: w.replyPropensity || 10,
+        }
+      : DEFAULT_WEIGHTS;
 
-    const relevance = computeRelevance(DEFAULT_WEIGHTS, {
+    const relevance = computeRelevance(weights, {
       professional: prof.signal,
       recency: recencySignal(f.lastDays, cadence),
       relationship: Math.min(1, f.avgThreadDepth / 5),
