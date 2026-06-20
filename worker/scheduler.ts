@@ -9,6 +9,7 @@ import { runEnrichment } from "./jobs/enrichment";
 import { runRecompute } from "./jobs/recompute";
 import { runSuggestions } from "./jobs/suggestions";
 import { runBrief } from "./jobs/brief";
+import { runNewsScan } from "./jobs/newsScan";
 import { runAutomation } from "./jobs/automation";
 
 /**
@@ -30,6 +31,8 @@ export const JOBS: JobDef[] = [
   { name: "morning-brief", cron: "0 7 * * *", run: () => runBrief("morning-newsletter") },
   { name: "midday-brief", cron: "30 12 * * *", run: () => runBrief("midday-update") },
   { name: "night-brief", cron: "0 20 * * *", run: () => runBrief("night-brief") },
+  // Intraday news sweep of top relationships + breaking pings, between the briefs.
+  { name: "news-scan", cron: "0 10,15,18 * * *", run: runNewsScan },
 ];
 
 export const byName = new Map(JOBS.map((j) => [j.name, j.run]));

@@ -31,5 +31,11 @@ export async function ensureSchema(sql: {
   await sql.unsafe(
     `ALTER TABLE "user_context" ADD COLUMN IF NOT EXISTS "writing_style_updated_at" timestamptz`,
   );
+  // X (Twitter) handle/id cache per contact + when we last looked.
+  await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "x_handle" text`);
+  await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "x_user_id" text`);
+  await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "x_checked_at" timestamptz`);
+  // When a suggestion was pushed (digest or breaking ping) so we never double-send it.
+  await sql.unsafe(`ALTER TABLE "suggestions" ADD COLUMN IF NOT EXISTS "notified_at" timestamptz`);
   console.log("[db] ensureSchema applied.");
 }

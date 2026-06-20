@@ -11,6 +11,7 @@ import {
   getProfile,
 } from "@/lib/integrations/unipile";
 import { writeClaim } from "@/lib/provenance/claims";
+import { getXUserByUsername, getRecentTweets, normalizeHandle } from "@/lib/integrations/x";
 import { complete } from "@/lib/llm";
 import { deriveWritingStyle } from "@/lib/agent/style";
 import { runRecompute } from "./recompute";
@@ -478,6 +479,154 @@ async function extractNews(
   }
 }
 
+/** Loose name check so we don't attach a stranger's X account to a contact. */
+function xNameMatches(contactName: string, xDisplayName: string): boolean {
+  const key = nameKey(contactName); // "first last"
+  const last = key.split(" ").pop() ?? "";
+  if (last.length < 3) return false;
+  return norm(xDisplayName).includes(last);
+}
+
+/** Find a plausible X handle for a contact from their stored profile, else a bounded Exa search. */
+async function discoverXHandle(c: Contact, canSearch: boolean): Promise<string | null> {
+  const blob = c.profileData ? JSON.stringify(c.profileData) : "";
+  const fromProfile = blob.match(/(?:x\.com|twitter\.com)\/(@?[A-Za-z0-9_]{1,15})/i);
+  const h0 = fromProfile ? normalizeHandle(fromProfile[0]) : null;
+  if (h0) return h0;
+  if (!canSearch || !isConfigured("exa")) return null;
+  const results = await search({
+    query: `${c.name} ${c.company ?? ""} (x.com OR twitter.com)`,
+    numResults: 5,
+  });
+  for (const r of results) {
+    const h = normalizeHandle(r.url);
+    if (h) return h;
+  }
+  return null;
+}
+
+/** Web (Exa) public-milestone pass: validated, dated, sourced news claims for priority contacts. */
+export async function webNewsPass(glist: Contact[], windowDays: number, limit = 25): Promise<void> {
+  if (!isConfigured("exa")) return;
+  const startDate = new Date(Date.now() - windowDays * 86_400_000).toISOString().slice(0, 10);
+  const priority = glist
+    .filter((c) => !c.isOrganization && ((c.relevance ?? 0) >= 55 || c.highValue))
+    .sort((a, b) => (b.relevance ?? 0) - (a.relevance ?? 0))
+    .slice(0, limit);
+  for (const c of priority) {
+    const results = await search({
+      query: `${c.name} ${c.company ?? ""} funding OR announcement OR appointed OR award`,
+      startPublishedDate: startDate,
+      numResults: 4,
+    });
+    const validated = await extractNews(c, results, windowDays);
+    for (const v of validated) {
+      await writeClaim({
+        contactId: c.id,
+        field: "news",
+        value: v.value,
+        sourceUrl: v.url,
+        eventDate: v.eventDate,
+        publishedDate: v.eventDate,
+        confidence: 0.7,
+      });
+    }
+  }
+}
+
+/** Surface the single most noteworthy recent X post for a contact and store it as a dated, sourced claim. */
+export async function xNewsPass(glist: Contact[], windowDays: number, limit = 20): Promise<void> {
+  if (!isConfigured("x")) return;
+  const priority = glist
+    .filter((c) => !c.isOrganization && ((c.relevance ?? 0) >= 55 || c.highValue))
+    .sort((a, b) => (b.relevance ?? 0) - (a.relevance ?? 0))
+    .slice(0, limit);
+
+  let discoveries = 0; // bound Exa-backed handle discovery per run
+  let posts = 0;
+  for (const c of priority) {
+    // Resolve an X identity, discovering (and caching) a handle at most once in a while.
+    let handle = c.xHandle ?? null;
+    let xUserId = c.xUserId ?? null;
+    if (!handle) {
+      const staleCheck =
+        !c.xCheckedAt || Date.now() - new Date(c.xCheckedAt).getTime() > 14 * 86_400_000;
+      if (!staleCheck) continue;
+      const canSearch = discoveries < 8;
+      handle = await discoverXHandle(c, canSearch);
+      if (canSearch) discoveries++;
+      if (!handle) {
+        await db.update(contacts).set({ xCheckedAt: new Date() }).where(eq(contacts.id, c.id));
+        continue;
+      }
+    }
+    if (!xUserId) {
+      const u = await getXUserByUsername(handle);
+      if (!u || !xNameMatches(c.name, u.name)) {
+        await db.update(contacts).set({ xCheckedAt: new Date() }).where(eq(contacts.id, c.id));
+        continue;
+      }
+      handle = u.username;
+      xUserId = u.id;
+      await db
+        .update(contacts)
+        .set({ xHandle: handle, xUserId, xCheckedAt: new Date() })
+        .where(eq(contacts.id, c.id));
+    }
+
+    const tweets = await getRecentTweets(xUserId, handle, 10);
+    const recent = tweets
+      .map((t) => ({ t, d: parseLiDate(t.createdAt) }))
+      .filter((x) => x.d && x.d.ageDays >= 0 && x.d.ageDays <= windowDays);
+    if (!recent.length) continue;
+
+    const payload = recent.map((x, i) => ({ i, text: x.t.text.slice(0, 280), date: x.d!.iso }));
+    const raw = await complete({
+      tier: "cheap",
+      system:
+        "You review a professional contact's recent X (Twitter) posts for a relationship CRM. " +
+        "Pick the SINGLE most noteworthy professional update worth referencing or congratulating: funding, launch, new role, milestone, major announcement, or a substantive take. " +
+        "Ignore casual chatter, replies, memes, and politics. If nothing is noteworthy, return i = null. Return JSON only.",
+      messages: [
+        {
+          role: "user",
+          content:
+            `Person: ${c.name}; Company: ${c.company ?? "unknown"}.\n` +
+            `Posts: ${JSON.stringify(payload)}\n` +
+            `Return {"i": number|null, "summary": "one factual sentence"}.`,
+        },
+      ],
+      maxTokens: 200,
+      temperature: 0,
+    });
+
+    try {
+      const obj = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] ?? "{}");
+      if (typeof obj.i !== "number" || !recent[obj.i]) continue;
+      const picked = recent[obj.i];
+      const dupe = await db
+        .select({ id: claims.id })
+        .from(claims)
+        .where(and(eq(claims.contactId, c.id), eq(claims.sourceUrl, picked.t.url)))
+        .limit(1);
+      if (dupe.length) continue;
+      await writeClaim({
+        contactId: c.id,
+        field: "x_post",
+        value: String(obj.summary || picked.t.text.slice(0, 140)),
+        sourceUrl: picked.t.url,
+        eventDate: picked.d!.iso,
+        publishedDate: picked.d!.iso,
+        confidence: 0.65,
+      });
+      posts++;
+    } catch {
+      /* skip bad batch */
+    }
+  }
+  console.log(`[enrichment] X pass: ${discoveries} discovered, ${posts} post(s) flagged`);
+}
+
 /**
  * Enrichment pass. Recency windows: the FIRST run looks back ~a month
  * (NEWS_FRESHNESS_DAYS), ongoing runs only ~a week (ENRICH_NEWS_DAYS_ONGOING).
@@ -561,32 +710,9 @@ export async function runEnrichment(): Promise<void> {
     if (liId && isConfigured("unipile")) {
       await deepProfilePass(userId, liId, windowDays, candidatesByUser.get(userId) ?? []);
     }
-    if (isConfigured("exa")) {
-      const startDate = new Date(Date.now() - windowDays * 86_400_000).toISOString().slice(0, 10);
-      const priority = glist
-        .filter((c) => !c.isOrganization && ((c.relevance ?? 0) >= 55 || c.highValue))
-        .sort((a, b) => (b.relevance ?? 0) - (a.relevance ?? 0))
-        .slice(0, 25);
-      for (const c of priority) {
-        const results = await search({
-          query: `${c.name} ${c.company ?? ""} funding OR announcement OR appointed OR award`,
-          startPublishedDate: startDate,
-          numResults: 4,
-        });
-        const validated = await extractNews(c, results, windowDays);
-        for (const v of validated) {
-          await writeClaim({
-            contactId: c.id,
-            field: "news",
-            value: v.value,
-            sourceUrl: v.url,
-            eventDate: v.eventDate,
-            publishedDate: v.eventDate,
-            confidence: 0.7,
-          });
-        }
-      }
-    }
+    // Public milestones from the web, then what they are posting on X.
+    await webNewsPass(glist, windowDays);
+    await xNewsPass(glist, windowDays);
   }
 
   console.log("[enrichment] pass complete");

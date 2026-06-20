@@ -133,18 +133,28 @@ export async function runSuggestions(): Promise<void> {
     const cl = await db.select().from(claims).where(eq(claims.contactId, c.id));
     const fresh = cl.filter((x) => isNews(x));
     if (fresh.length) {
-      const chosen = fresh.find((x) => x.field === "job_change") ?? fresh.find((x) => x.field === "news");
+      const chosen =
+        fresh.find((x) => x.field === "job_change") ??
+        fresh.find((x) => x.field === "news") ??
+        fresh.find((x) => x.field === "x_post");
       if (chosen) {
         const trigger = chosen.field === "job_change" ? "job_change" : "milestone";
         if (!(await alreadyPending(c.userId, c.id, trigger))) {
           const weight = trigger === "job_change" ? TRIGGER_WEIGHT.job_change : TRIGGER_WEIGHT.milestone;
-          const score = Math.min(1, ((c.relevance ?? 0) / 100) * weight + 0.15);
+          // Newer updates rank above stale ones in the digest.
+          const ageDays = chosen.eventDate
+            ? (Date.now() - new Date(chosen.eventDate).getTime()) / 86_400_000
+            : 99;
+          const recencyBoost = ageDays <= 2 ? 0.1 : ageDays <= 7 ? 0.05 : 0;
+          const score = Math.min(1, ((c.relevance ?? 0) / 100) * weight + 0.15 + recencyBoost);
           const message = await draft({
             name: c.name,
             trigger:
               trigger === "job_change"
                 ? "They recently changed roles; congratulate them warmly."
-                : "Something noteworthy just happened for them; acknowledge it.",
+                : chosen.field === "x_post"
+                  ? "They just posted something notable on X; react to it naturally."
+                  : "Something noteworthy just happened for them; acknowledge it.",
             fact: chosen.value,
             focus: cx.focus,
             style: cx.style,
@@ -155,7 +165,12 @@ export async function runSuggestions(): Promise<void> {
             triggerType: trigger,
             reason: `${c.name}: ${chosen.value}`,
             draftMessage: message,
-            intentLabel: trigger === "job_change" ? "Congratulate on the move" : "Acknowledge recent news",
+            intentLabel:
+              trigger === "job_change"
+                ? "Congratulate on the move"
+                : chosen.field === "x_post"
+                  ? "React to their X post"
+                  : "Acknowledge recent news",
             priority: priorityOf(score),
             score,
             claimIds: fresh.map((f) => f.id),

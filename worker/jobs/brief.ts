@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
   claims,
@@ -38,7 +38,13 @@ export async function runBrief(slug: string): Promise<void> {
     const pending = await db
       .select()
       .from(suggestions)
-      .where(and(eq(suggestions.userId, u.id), eq(suggestions.status, "pending")))
+      .where(
+        and(
+          eq(suggestions.userId, u.id),
+          eq(suggestions.status, "pending"),
+          isNull(suggestions.notifiedAt), // skip anything already pushed (e.g. a breaking ping)
+        ),
+      )
       .orderBy(desc(suggestions.score))
       .limit(15);
     if (!pending.length) {
@@ -101,7 +107,27 @@ export async function runBrief(slug: string): Promise<void> {
     const freshClaims = claimIds.length
       ? await db.select().from(claims).where(inArray(claims.id, claimIds))
       : [];
-    const rawBody = passed.map((s) => `• ${s.reason}\n${s.draftMessage ?? ""}`).join("\n---\n");
+    const claimById = new Map(freshClaims.map((c) => [c.id, c]));
+    const shortDate = (d: string | Date | null) =>
+      d ? new Date(typeof d === "string" && d.length <= 10 ? `${d}T00:00:00` : d).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "";
+    const domainOf = (url: string) => {
+      try {
+        return new URL(url).hostname.replace(/^www\./, "");
+      } catch {
+        return "source";
+      }
+    };
+    // Each item leads with the news, links the real source + date, then the ready-to-send draft.
+    const rawBody = passed
+      .map((s) => {
+        const claim = (s.claimIds ?? []).map((id) => claimById.get(id)).find((c) => c?.sourceUrl);
+        const when = claim ? shortDate(claim.publishedDate ?? claim.eventDate) : "";
+        const src = claim?.sourceUrl
+          ? ` — ${when ? `${when} · ` : ""}[${domainOf(claim.sourceUrl)}](${claim.sourceUrl})`
+          : "";
+        return `• ${s.reason}${src}\n${s.draftMessage ?? ""}`;
+      })
+      .join("\n---\n");
     const { clean, dropped } = verifyBriefAgainstClaims(rawBody, freshClaims);
     if (dropped.length) {
       console.log(`[brief:${slug}] verification dropped ${dropped.length} unbacked line(s)`);
@@ -133,6 +159,11 @@ export async function runBrief(slug: string): Promise<void> {
         outcome: "sent",
       });
     }
+    // Mark as pushed so no later brief or breaking ping repeats these.
+    await db
+      .update(suggestions)
+      .set({ notifiedAt: new Date() })
+      .where(inArray(suggestions.id, passed.map((s) => s.id)));
     console.log(`[brief:${slug}] sent ${passed.length} item(s) to ${u.email}`);
   }
 }

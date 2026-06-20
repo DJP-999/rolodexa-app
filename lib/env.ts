@@ -24,6 +24,8 @@ const schema = z.object({
 
   EXA_API_KEY: z.string().optional(),
 
+  X_BEARER_TOKEN: z.string().optional(),
+
   UNIPILE_DSN: z.string().optional(),
   UNIPILE_API_KEY: z.string().optional(),
 
@@ -46,7 +48,7 @@ const schema = z.object({
 
 export const env = schema.parse(process.env);
 
-export type Integration = "nylas" | "telegram" | "exa" | "llm" | "unipile" | "openrouter";
+export type Integration = "nylas" | "telegram" | "exa" | "llm" | "unipile" | "openrouter" | "x";
 
 export function isConfigured(which: Integration): boolean {
   switch (which) {
@@ -62,5 +64,7 @@ export function isConfigured(which: Integration): boolean {
       return Boolean(env.UNIPILE_DSN && env.UNIPILE_API_KEY);
     case "openrouter":
       return Boolean(env.OPENROUTER_API_KEY);
+    case "x":
+      return Boolean(env.X_BEARER_TOKEN);
   }
 }
