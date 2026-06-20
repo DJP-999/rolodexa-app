@@ -38,7 +38,8 @@ const schema = z.object({
     .default("true")
     .transform((v) => v !== "false"),
   ENRICH_STALE_AFTER_DAYS: z.coerce.number().default(30),
-  NEWS_FRESHNESS_DAYS: z.coerce.number().default(14),
+  NEWS_FRESHNESS_DAYS: z.coerce.number().default(31),
+  ENRICH_NEWS_DAYS_ONGOING: z.coerce.number().default(7),
   ENRICH_DAILY_LINKEDIN_CAP: z.coerce.number().default(120),
   ENRICH_MONTHLY_BUDGET_USD: z.coerce.number().default(40),
 });

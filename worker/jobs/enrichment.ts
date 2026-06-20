@@ -1,9 +1,15 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { contacts, connectedAccounts, interactions } from "@/db/schema";
+import { contacts, connectedAccounts, interactions, claims, suggestions, userContext } from "@/db/schema";
 import { env, isConfigured } from "@/lib/env";
 import { search } from "@/lib/integrations/exa";
-import { getAllRelations, getChats, getChatMessages, getEmails } from "@/lib/integrations/unipile";
+import {
+  getAllRelations,
+  getChats,
+  getChatMessages,
+  getEmails,
+  getProfile,
+} from "@/lib/integrations/unipile";
 import { writeClaim } from "@/lib/provenance/claims";
 import { complete } from "@/lib/llm";
 import { deriveWritingStyle } from "@/lib/agent/style";
@@ -12,13 +18,11 @@ import { runRecompute } from "./recompute";
 type Contact = typeof contacts.$inferSelect;
 
 const norm = (s: string) => s.trim().toLowerCase();
-const today = () => new Date().toISOString().slice(0, 10);
 
 const TITLES = new Set([
   "dr", "mr", "mrs", "ms", "prof", "jr", "sr", "ii", "iii", "iv", "phd", "cfa", "mba", "esq",
 ]);
 
-/** Normalize a name to first+last, accent/title/suffix-insensitive, for fuzzy matching. */
 function nameKey(name: string): string {
   const t = name
     .toLowerCase()
@@ -32,14 +36,12 @@ function nameKey(name: string): string {
   return `${t[0]} ${t[t.length - 1]}`;
 }
 
-/** Extract the LinkedIn vanity slug (/in/<slug>) from any URL form. */
 function linkedinSlug(url?: string | null): string | null {
   if (!url) return null;
   const m = url.toLowerCase().match(/\/in\/([^/?#]+)/);
   return m ? decodeURIComponent(m[1]).replace(/\/+$/, "") : null;
 }
 
-/** Only trust "Title at Company" (single ' at ', no other separators) — no false employers. */
 function parseHeadline(headline?: string | null): { title: string | null; company: string | null } {
   if (!headline) return { title: null, company: null };
   const h = headline.trim();
@@ -59,6 +61,25 @@ function isRealChange(oldC: string | null, newC: string | null): boolean {
   return true;
 }
 
+/** Parse a LinkedIn date ("YYYY", "YYYY-MM", "YYYY-MM-DD") into an ISO date + age in days. */
+function parseLiDate(s: unknown): { iso: string; ageDays: number } | null {
+  if (typeof s !== "string" || !s.trim()) return null;
+  const t = s.trim();
+  const full = /^\d{4}$/.test(t) ? `${t}-01-01` : /^\d{4}-\d{2}$/.test(t) ? `${t}-01` : t;
+  const d = new Date(full);
+  if (isNaN(d.getTime())) return null;
+  return { iso: d.toISOString().slice(0, 10), ageDays: (Date.now() - d.getTime()) / 86_400_000 };
+}
+
+type Candidate = {
+  contactId: string;
+  identifier: string;
+  profileUrl: string | null;
+  oldCompany: string;
+  newCompany: string;
+  name: string;
+};
+
 async function accountId(userId: string, provider: string): Promise<string | null> {
   const a = (
     await db
@@ -70,14 +91,20 @@ async function accountId(userId: string, provider: string): Promise<string | nul
   return a?.externalId ?? null;
 }
 
-/** Match contacts to the user's LinkedIn network (slug first, then fuzzy name). Returns member_id → contactId. */
+/**
+ * Match contacts to the user's LinkedIn network. Corrects company/role from the
+ * headline and collects job-change CANDIDATES (a headline employer that differs
+ * from the stored one) WITHOUT dating them — a headline can't tell us *when* they
+ * moved, so dating happens in a separate profile-lookup pass.
+ */
 async function matchLinkedIn(
   userId: string,
   list: Contact[],
   liId: string | null,
-): Promise<Map<string, string>> {
+): Promise<{ providerToContact: Map<string, string>; candidates: Candidate[] }> {
   const providerToContact = new Map<string, string>();
-  if (!liId || !isConfigured("unipile")) return providerToContact;
+  const candidates: Candidate[] = [];
+  if (!liId || !isConfigured("unipile")) return { providerToContact, candidates };
 
   const relations = await getAllRelations(liId);
   const bySlug = new Map<string, any>();
@@ -102,34 +129,80 @@ async function matchLinkedIn(
     if (r.member_id) providerToContact.set(String(r.member_id), c.id);
 
     const { title, company } = parseHeadline(r.headline);
+    const update: Partial<Contact> = {
+      linkedinUrl: r.public_profile_url ?? c.linkedinUrl ?? null,
+      role: title ?? c.role,
+      isVerifiedPerson: true,
+      otherSignals: r.headline ? [r.headline] : c.otherSignals,
+      enrichedAt: new Date(),
+    };
+
     if (company && isRealChange(c.company, company)) {
-      await writeClaim({
+      // Defer the company update + dating to the profile-lookup pass.
+      candidates.push({
         contactId: c.id,
-        field: "job_change",
-        value: `${c.name} appears to have moved from ${c.company} to ${company}`,
-        sourceUrl: r.public_profile_url ?? null,
-        eventDate: today(),
-        publishedDate: today(),
-        confidence: 0.7,
+        identifier: String(r.public_identifier ?? r.member_id ?? ""),
+        profileUrl: r.public_profile_url ?? null,
+        oldCompany: c.company ?? "",
+        newCompany: company,
+        name: c.name,
       });
+    } else if (company && !c.company) {
+      update.company = company;
     }
-    await db
-      .update(contacts)
-      .set({
-        linkedinUrl: r.public_profile_url ?? c.linkedinUrl ?? null,
-        company: company ?? c.company,
-        role: title ?? c.role,
-        isVerifiedPerson: true,
-        otherSignals: r.headline ? [r.headline] : c.otherSignals,
-        enrichedAt: new Date(),
-      })
-      .where(eq(contacts.id, c.id));
+
+    await db.update(contacts).set(update).where(eq(contacts.id, c.id));
   }
-  console.log(`[enrichment] LinkedIn matched ${matched}/${list.length} for ${userId}`);
-  return providerToContact;
+  console.log(`[enrichment] LinkedIn matched ${matched}/${list.length}; ${candidates.length} move candidate(s)`);
+  return { providerToContact, candidates };
 }
 
-/** Sync recent LinkedIn conversations into interactions (idempotent) → real last-contacted + reply signal. */
+/**
+ * Date job-change candidates via a rate-limited profile lookup. Updates the
+ * contact's company to the authoritative current one, and ONLY writes a dated
+ * job_change claim when the current position's start date is inside the window.
+ */
+async function dateJobChanges(
+  liId: string,
+  candidates: Candidate[],
+  windowDays: number,
+  byId: Map<string, Contact>,
+): Promise<void> {
+  candidates.sort(
+    (a, b) => (byId.get(b.contactId)?.relevance ?? 0) - (byId.get(a.contactId)?.relevance ?? 0),
+  );
+  let used = 0;
+  let flagged = 0;
+  for (const cand of candidates) {
+    if (used >= env.ENRICH_DAILY_LINKEDIN_CAP) break;
+    if (!cand.identifier) {
+      await db.update(contacts).set({ company: cand.newCompany }).where(eq(contacts.id, cand.contactId));
+      continue;
+    }
+    const profile = await getProfile(liId, cand.identifier, ["experience"]);
+    used++;
+    const exp: any[] = profile?.work_experience ?? [];
+    const current = exp.find((e) => e?.current) ?? exp[0];
+    const newCompany = (typeof current?.company === "string" && current.company) || cand.newCompany;
+    await db.update(contacts).set({ company: newCompany }).where(eq(contacts.id, cand.contactId));
+
+    const dated = parseLiDate(current?.start);
+    if (dated && dated.ageDays >= 0 && dated.ageDays <= windowDays && cand.profileUrl) {
+      await writeClaim({
+        contactId: cand.contactId,
+        field: "job_change",
+        value: `${cand.name} recently moved to ${newCompany}${cand.oldCompany ? ` from ${cand.oldCompany}` : ""}`,
+        sourceUrl: cand.profileUrl,
+        eventDate: dated.iso,
+        publishedDate: dated.iso,
+        confidence: 0.85,
+      });
+      flagged++;
+    }
+  }
+  console.log(`[enrichment] profile-dated ${used} candidate(s); ${flagged} recent move(s) flagged`);
+}
+
 async function syncLinkedInMessages(
   userId: string,
   liId: string,
@@ -166,7 +239,6 @@ async function syncLinkedInMessages(
   console.log(`[enrichment] LinkedIn messages synced across ${n} chats`);
 }
 
-/** Sync recent email into interactions (idempotent), matched to contacts by address. */
 async function syncEmail(userId: string, emailId: string): Promise<void> {
   const cs = await db
     .select({ id: contacts.id, email: contacts.email })
@@ -218,7 +290,6 @@ async function syncEmail(userId: string, emailId: string): Promise<void> {
   console.log(`[enrichment] email synced ${n} messages`);
 }
 
-/** Batched cheap-model categorization into relationship boxes for one user. */
 async function categorizeUser(userId: string): Promise<void> {
   const refreshed = await db.select().from(contacts).where(eq(contacts.userId, userId));
   const need = refreshed.filter(
@@ -266,14 +337,12 @@ async function categorizeUser(userId: string): Promise<void> {
   }
 }
 
-/**
- * Validate Exa results: genuinely about THIS contact AND a noteworthy recent
- * event — strict, to avoid namesake hallucinations. Returns dated, sourced items.
- */
+/** Validate Exa results: genuinely about THIS contact, noteworthy, AND dated within the window. */
 async function extractNews(
   c: Contact,
   results: { title?: string; url: string; publishedDate?: string; text?: string; highlights?: string[] }[],
-): Promise<{ value: string; url: string; eventDate: string | null; published: string | null }[]> {
+  windowDays: number,
+): Promise<{ value: string; url: string; eventDate: string }[]> {
   if (!results.length) return [];
   const payload = results.map((r, i) => ({
     i,
@@ -288,7 +357,7 @@ async function extractNews(
       "You validate web search results about a specific professional contact for a relationship CRM. " +
       "For each result decide: is it genuinely about THIS person (same individual — not a namesake at a different company or field), " +
       "and does it report a NOTEWORTHY, RECENT professional event (funding, new role or promotion, company launch, award, acquisition, board seat, major milestone)? " +
-      "Extract the event date if stated. Be strict: when unsure whether it's the same person, mark about_this_person false. Return JSON only.",
+      "Give the event date if stated. Be strict: when unsure it's the same person, mark about_this_person false. Return JSON only.",
     messages: [
       {
         role: "user",
@@ -303,17 +372,13 @@ async function extractNews(
   });
   try {
     const arr = JSON.parse(raw.match(/\[[\s\S]*\]/)?.[0] ?? "[]");
-    const out: { value: string; url: string; eventDate: string | null; published: string | null }[] = [];
+    const out: { value: string; url: string; eventDate: string }[] = [];
     for (const x of arr) {
-      if (x?.about_this_person && x?.noteworthy && typeof x.i === "number" && results[x.i]) {
-        const r = results[x.i];
-        out.push({
-          value: String(x.summary || r.title || r.url),
-          url: r.url,
-          eventDate: typeof x.event_date === "string" ? x.event_date : null,
-          published: r.publishedDate?.slice(0, 10) ?? null,
-        });
-      }
+      if (!(x?.about_this_person && x?.noteworthy && typeof x.i === "number" && results[x.i])) continue;
+      const r = results[x.i];
+      const dated = parseLiDate(x.event_date) ?? parseLiDate(r.publishedDate);
+      if (!dated || dated.ageDays < 0 || dated.ageDays > windowDays) continue; // recency gate
+      out.push({ value: String(x.summary || r.title || r.url), url: r.url, eventDate: dated.iso });
     }
     return out;
   } catch {
@@ -322,9 +387,10 @@ async function extractNews(
 }
 
 /**
- * Enrichment pass. Cheap/bulk first (LinkedIn match + message/email sync + style
- * learning + categorization), then re-grade, then the rationed paid step (Exa news
- * for priority, validated). Runs nightly and on demand; degrades cleanly when unset.
+ * Enrichment pass. Recency windows: the FIRST run looks back ~a month
+ * (NEWS_FRESHNESS_DAYS), ongoing runs only ~a week (ENRICH_NEWS_DAYS_ONGOING).
+ * Job changes are only flagged as news when a profile lookup dates the move inside
+ * the window — a stale CSV vs. current LinkedIn employer is corrected silently.
  */
 export async function runEnrichment(): Promise<void> {
   const all = await db.select().from(contacts);
@@ -337,48 +403,94 @@ export async function runEnrichment(): Promise<void> {
     byUser.set(c.userId, l);
   }
 
+  const windowByUser = new Map<string, number>();
+
   for (const [userId, list] of byUser) {
+    const ctx = (
+      await db.select().from(userContext).where(eq(userContext.userId, userId)).limit(1)
+    )[0];
+    const isFirstRun = !ctx?.firstEnrichDone;
+    const windowDays = isFirstRun ? env.NEWS_FRESHNESS_DAYS : env.ENRICH_NEWS_DAYS_ONGOING;
+    windowByUser.set(userId, windowDays);
+
+    // Clean slate: drop prior (mis-dated) job-change claims + their pending suggestions.
+    const contactIds = list.map((c) => c.id);
+    if (contactIds.length) {
+      await db
+        .delete(claims)
+        .where(and(eq(claims.field, "job_change"), inArray(claims.contactId, contactIds)));
+    }
+    await db
+      .delete(suggestions)
+      .where(
+        and(
+          eq(suggestions.userId, userId),
+          eq(suggestions.status, "pending"),
+          inArray(suggestions.triggerType, ["job_change", "milestone"]),
+        ),
+      );
+
     const liId = await accountId(userId, "linkedin");
-    const providerToContact = await matchLinkedIn(userId, list, liId);
-    if (liId) await syncLinkedInMessages(userId, liId, providerToContact);
+    const { providerToContact, candidates } = await matchLinkedIn(userId, list, liId);
+
+    if (liId) {
+      const byId = new Map(
+        (await db.select().from(contacts).where(eq(contacts.userId, userId))).map((c) => [c.id, c]),
+      );
+      await dateJobChanges(liId, candidates, windowDays, byId);
+      await syncLinkedInMessages(userId, liId, providerToContact);
+    }
 
     const emailId = await accountId(userId, "email");
     if (emailId) await syncEmail(userId, emailId);
 
     await deriveWritingStyle(userId);
     await categorizeUser(userId);
+
+    if (isFirstRun) {
+      await db
+        .insert(userContext)
+        .values({ userId, firstEnrichDone: true })
+        .onConflictDoUpdate({ target: userContext.userId, set: { firstEnrichDone: true } });
+    }
   }
 
-  // Re-grade with filled data + real interactions, so relevance + last-contacted are meaningful.
   await runRecompute();
 
-  // Phase C: Exa public milestones for the now-ranked priority set (count-bounded).
+  // Phase C: Exa public milestones for the priority set, dated within the window.
   if (isConfigured("exa")) {
     const graded = await db.select().from(contacts);
-    const priority = graded
-      .filter((c) => !c.isOrganization && ((c.relevance ?? 0) >= 55 || c.highValue))
-      .sort((a, b) => (b.relevance ?? 0) - (a.relevance ?? 0))
-      .slice(0, 25);
-    const startDate = new Date(Date.now() - env.NEWS_FRESHNESS_DAYS * 86_400_000)
-      .toISOString()
-      .slice(0, 10);
-    for (const c of priority) {
-      const results = await search({
-        query: `${c.name} ${c.company ?? ""} funding OR announcement OR appointed OR award`,
-        startPublishedDate: startDate,
-        numResults: 4,
-      });
-      const validated = await extractNews(c, results);
-      for (const v of validated) {
-        await writeClaim({
-          contactId: c.id,
-          field: "news",
-          value: v.value,
-          sourceUrl: v.url,
-          eventDate: v.eventDate ?? v.published ?? null,
-          publishedDate: v.published,
-          confidence: 0.7,
+    const gByUser = new Map<string, Contact[]>();
+    for (const c of graded) {
+      const l = gByUser.get(c.userId) ?? [];
+      l.push(c);
+      gByUser.set(c.userId, l);
+    }
+    for (const [userId, glist] of gByUser) {
+      const windowDays = windowByUser.get(userId) ?? env.NEWS_FRESHNESS_DAYS;
+      const startDate = new Date(Date.now() - windowDays * 86_400_000).toISOString().slice(0, 10);
+      const priority = glist
+        .filter((c) => !c.isOrganization && ((c.relevance ?? 0) >= 55 || c.highValue))
+        .sort((a, b) => (b.relevance ?? 0) - (a.relevance ?? 0))
+        .slice(0, 25);
+      for (const c of priority) {
+        const results = await search({
+          query: `${c.name} ${c.company ?? ""} funding OR announcement OR appointed OR award`,
+          startPublishedDate: startDate,
+          numResults: 4,
         });
+        const validated = await extractNews(c, results, windowDays);
+        for (const v of validated) {
+          await writeClaim({
+            contactId: c.id,
+            field: "news",
+            value: v.value,
+            sourceUrl: v.url,
+            eventDate: v.eventDate,
+            publishedDate: v.eventDate,
+            confidence: 0.7,
+          });
+        }
       }
     }
   }

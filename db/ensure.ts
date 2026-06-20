@@ -11,5 +11,9 @@ export async function ensureSchema(sql: {
   await sql.unsafe(`ALTER TYPE "channel" ADD VALUE IF NOT EXISTS 'linkedin'`);
   // Learned outreach voice, used to draft proactive messages in the user's style.
   await sql.unsafe(`ALTER TABLE "user_context" ADD COLUMN IF NOT EXISTS "writing_style" text`);
+  // Whether the first (month-window) enrichment has run; later runs use the week window.
+  await sql.unsafe(
+    `ALTER TABLE "user_context" ADD COLUMN IF NOT EXISTS "first_enrich_done" boolean DEFAULT false`,
+  );
   console.log("[db] ensureSchema applied.");
 }
