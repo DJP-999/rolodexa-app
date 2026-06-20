@@ -13,50 +13,67 @@ function hasLeak(s: string): boolean {
   return /\[[^\]]*\]/.test(s) || /(^|\s)note:/i.test(s) || /\bneeded\b/i.test(s) || /rewrite it/i.test(s);
 }
 
-/** Draft a short outreach note AS the user, in their learned voice — never a placeholder. */
-async function draft(opts: {
+/**
+ * Generate the "why this, why now" rationale AND the outreach message in one call.
+ * Rationale is for the user's eyes; the message is the friendly note to send.
+ */
+async function generateOutreach(opts: {
   name: string;
-  reason: string;
+  trigger: string;
   focus?: string | null;
   style?: string | null;
   fact?: string;
-}): Promise<string> {
-  const msg = await complete({
+}): Promise<{ rationale: string; message: string }> {
+  const raw = await complete({
     tier: "strong",
     system:
-      "You write outreach AS THE USER (first person), to send from their own account to a peer. " +
+      "You help a dealmaker reach out to someone they ALREADY KNOW. Return JSON with two fields:\n" +
+      '"rationale": 1-2 sentences for the user\'s eyes only, explaining why reach out to this person and why now.\n' +
+      '"message": the actual note to send, first person, as the user.\n' +
+      "For the message: " +
       TONE_GUIDE +
-      " Use the recipient's real first name. Open with the concrete reason, never with an ask. " +
-      "If a concrete detail is provided, reference it. If not, write a sincere check-in without inventing any specifics. " +
-      "Never invent facts. Output ONLY the final message text." +
-      (opts.style ? `\n\nWhere it fits, echo how the user actually writes:\n${opts.style}` : ""),
+      " Use the recipient's real first name. Reference the concrete detail if given; if not, a genuine friendly hello with no invented specifics. Never invent facts. " +
+      'Return ONLY JSON: {"rationale":"...","message":"..."}.' +
+      (opts.style ? `\n\nMatch how the user writes:\n${opts.style}` : ""),
     messages: [
       {
         role: "user",
         content:
-          `Recipient: ${opts.name}\nWhy I am reaching out: ${opts.reason}` +
-          (opts.fact
-            ? `\nConcrete detail to reference: ${opts.fact}`
-            : "\n(No specific detail. Write a sincere check-in. Do not invent or reference any specific event.)") +
-          (opts.focus ? `\nMy current focus (only if it fits naturally): ${opts.focus}` : ""),
+          `Recipient: ${opts.name}\nTrigger: ${opts.trigger}` +
+          (opts.fact ? `\nConcrete detail: ${opts.fact}` : "") +
+          (opts.focus ? `\nMy current focus: ${opts.focus}` : ""),
       },
     ],
-    maxTokens: 220,
-    temperature: 0.5,
+    maxTokens: 360,
+    temperature: 0.6,
   });
 
-  if (msg && msg.length > 0 && !msg.startsWith("[llm-stub") && !hasLeak(msg)) return stripEmDashes(msg);
+  try {
+    const obj = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] ?? "{}");
+    const message = typeof obj.message === "string" ? obj.message.trim() : "";
+    const rationale = typeof obj.rationale === "string" ? obj.rationale.trim() : "";
+    if (message && !hasLeak(message)) {
+      return { rationale: stripEmDashes(rationale), message: stripEmDashes(message) };
+    }
+  } catch {
+    /* fall through to the deterministic fallback */
+  }
 
-  // Deterministic, placeholder-free fallback so nothing half-written ever ships.
   const first = opts.name.split(/\s+/)[0] || "there";
   if (opts.fact) {
-    return stripEmDashes(
-      `Congrats on the new seat, ${first}. Saw the move and wanted to reach out directly. Would be good to compare notes once you are settled. Free for a quick call this week?`,
-    );
+    return {
+      rationale: "They just had a notable update, so it is a natural, timely reason to reconnect.",
+      message: stripEmDashes(
+        `Hey ${first}, congrats on the news, saw it and had to reach out. Let's catch up once things settle, would love to hear how it is going.`,
+      ),
+    };
   }
-  return stripEmDashes(
-    `${first}, it has been too long. No agenda, I just want to catch up and hear what you are focused on right now. Free for a quick call this week?`,
-  );
+  return {
+    rationale: "It has been a while since you connected, and this relationship is worth keeping warm.",
+    message: stripEmDashes(
+      `Hey ${first}, it has been way too long. No agenda, you just came to mind and I wanted to say hi. Free to catch up sometime soon?`,
+    ),
+  };
 }
 
 async function alreadyPending(userId: string, contactId: string, trigger: string): Promise<boolean> {
@@ -111,17 +128,19 @@ export async function runSuggestions(): Promise<void> {
     if (lastDays !== null && lastDays > cadence && (c.relevance ?? 0) >= 30) {
       if (!(await alreadyPending(c.userId, c.id, "re_engage"))) {
         const score = Math.min(1, ((c.relevance ?? 0) / 100) * TRIGGER_WEIGHT.re_engage + 0.1);
+        const out = await generateOutreach({
+          name: c.name,
+          trigger: `You have not connected in ${lastDays} days; reconnect to keep the relationship warm.`,
+          focus: cx.focus,
+          style: cx.style,
+        });
         await db.insert(suggestions).values({
           userId: c.userId,
           contactId: c.id,
           triggerType: "re_engage",
-          reason: `No touchpoint with ${c.name} in ${lastDays} days — worth a genuine check-in.`,
-          draftMessage: await draft({
-            name: c.name,
-            reason: `It's been about ${lastDays} days since we last connected; I want to check in and keep the relationship warm — no agenda.`,
-            focus: cx.focus,
-            style: cx.style,
-          }),
+          reason: `No touchpoint with ${c.name} in ${lastDays} days.`,
+          rationale: out.rationale,
+          draftMessage: out.message,
           intentLabel: "Reconnect with a check-in",
           priority: priorityOf(score),
           score,
@@ -141,21 +160,23 @@ export async function runSuggestions(): Promise<void> {
         if (!(await alreadyPending(c.userId, c.id, trigger))) {
           const weight = trigger === "job_change" ? TRIGGER_WEIGHT.job_change : TRIGGER_WEIGHT.milestone;
           const score = Math.min(1, ((c.relevance ?? 0) / 100) * weight + 0.15);
+          const out = await generateOutreach({
+            name: c.name,
+            trigger:
+              trigger === "job_change"
+                ? "They recently changed roles; congratulate them warmly."
+                : "Something noteworthy just happened for them; acknowledge it.",
+            fact: chosen.value,
+            focus: cx.focus,
+            style: cx.style,
+          });
           await db.insert(suggestions).values({
             userId: c.userId,
             contactId: c.id,
             triggerType: trigger,
             reason: `${c.name}: ${chosen.value}`,
-            draftMessage: await draft({
-              name: c.name,
-              reason:
-                trigger === "job_change"
-                  ? "They recently changed roles — a quick, warm congratulations."
-                  : "Something noteworthy just happened for them — a brief, genuine acknowledgement.",
-              fact: chosen.value,
-              focus: cx.focus,
-              style: cx.style,
-            }),
+            rationale: out.rationale,
+            draftMessage: out.message,
             intentLabel: trigger === "job_change" ? "Congratulate on the move" : "Acknowledge recent news",
             priority: priorityOf(score),
             score,

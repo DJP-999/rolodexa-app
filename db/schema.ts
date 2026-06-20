@@ -66,7 +66,7 @@ export const suggestions = pgTable("suggestions", {
   userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
   contactId: uuid("contact_id").references(() => contacts.id, { onDelete: "cascade" }),
   triggerType: triggerType("trigger_type").notNull(), reason: text("reason").notNull(),
-  draftMessage: text("draft_message"), intentLabel: text("intent_label"), priority: priority("priority").default("medium"),
+  draftMessage: text("draft_message"), rationale: text("rationale"), intentLabel: text("intent_label"), priority: priority("priority").default("medium"),
   score: real("score"), status: suggestionStatus("status").default("pending"),
   claimIds: jsonb("claim_ids").$type<string[]>().default([]),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),

@@ -19,5 +19,7 @@ export async function ensureSchema(sql: {
   await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "summary" text`);
   // Deep LinkedIn profile (career, education, skills) for priority contacts.
   await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "profile_data" jsonb`);
+  // Why-this-why-now reasoning shown with each suggestion.
+  await sql.unsafe(`ALTER TABLE "suggestions" ADD COLUMN IF NOT EXISTS "rationale" text`);
   console.log("[db] ensureSchema applied.");
 }

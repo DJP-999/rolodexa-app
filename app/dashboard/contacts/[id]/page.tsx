@@ -313,6 +313,9 @@ export default async function ContactProfile({ params }: { params: Promise<{ id:
             {sug.map((s) => (
               <div key={s.id} className="rounded-xl bg-black/[0.02] p-3">
                 <div className="text-sm text-ink">{s.reason}</div>
+                {s.rationale && (
+                  <p className="mt-1.5 text-xs text-amber-700">Why now: {s.rationale}</p>
+                )}
                 {s.draftMessage && (
                   <p className="mt-1.5 text-sm italic text-muted">&ldquo;{s.draftMessage}&rdquo;</p>
                 )}

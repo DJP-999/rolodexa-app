@@ -1,6 +1,6 @@
 import { desc, eq, inArray } from "drizzle-orm";
 import Link from "next/link";
-import { Sparkles, Check, Clock, X, Pencil } from "lucide-react";
+import { Sparkles, Check, Clock, X, Pencil, Lightbulb } from "lucide-react";
 import { db } from "@/db";
 import { suggestions, contacts } from "@/db/schema";
 import { approveAction, snoozeAction, dismissAction, generateAction } from "./actions";
@@ -128,6 +128,15 @@ export default async function SuggestionsPage({
                 </div>
 
                 <p className="mt-3 text-sm text-ink">{s.reason}</p>
+
+                {s.rationale && (
+                  <div className="mt-3 rounded-xl border border-amber-200/70 bg-amber-50/60 p-3">
+                    <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-amber-700">
+                      <Lightbulb className="h-3.5 w-3.5" /> Why now
+                    </div>
+                    <p className="mt-1 text-sm text-ink/80">{s.rationale}</p>
+                  </div>
+                )}
 
                 {s.draftMessage && (
                   <div className="mt-3 rounded-xl bg-black/[0.03] p-4">
