@@ -117,3 +117,4 @@ export const jobRuns = pgTable("job_runs", {
 
 export type Contact = typeof contacts.$inferSelect;
 export type Claim = typeof claims.$inferSelect;
+export type Interaction = typeof interactions.$inferSelect;

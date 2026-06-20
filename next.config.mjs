@@ -3,9 +3,9 @@ const nextConfig = {
   reactStrictMode: true,
   serverExternalPackages: ["postgres", "bullmq", "ioredis"],
   eslint: { ignoreDuringBuilds: true },
-  // Don't block the first deploy on a stray type error; run `npm run typecheck`
-  // locally/CI to surface them. Flip back to false once green.
-  typescript: { ignoreBuildErrors: true },
+  // Codebase is type-clean (verified via `npm run typecheck`), so let the build
+  // catch type regressions instead of shipping them silently.
+  typescript: { ignoreBuildErrors: false },
 };
 
 export default nextConfig;

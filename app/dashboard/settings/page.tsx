@@ -1,6 +1,7 @@
 import { isConfigured } from "@/lib/env";
 import { getPrimaryUser, getUserContextRow, getConnectedAccount } from "@/lib/user";
-import { saveContextAction, linkLinkedInAction, linkEmailAction, enrichNowAction } from "./actions";
+import { listAccounts } from "@/lib/integrations/unipile";
+import { saveContextAction, useAccount, disconnectAccount, enrichNowAction } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -31,15 +32,16 @@ function Status({ on }: { on: boolean }) {
 async function getData() {
   try {
     const user = await getPrimaryUser();
-    if (!user) return { ctx: null, linkedin: null, email: null };
-    const [ctx, linkedin, email] = await Promise.all([
+    if (!user) return { ctx: null, linkedin: null, email: null, accounts: [] as any[] };
+    const [ctx, linkedin, email, accounts] = await Promise.all([
       getUserContextRow(user.id),
       getConnectedAccount(user.id, "linkedin"),
       getConnectedAccount(user.id, "email"),
+      listAccounts(),
     ]);
-    return { ctx, linkedin, email };
+    return { ctx, linkedin, email, accounts };
   } catch {
-    return { ctx: null, linkedin: null, email: null };
+    return { ctx: null, linkedin: null, email: null, accounts: [] as any[] };
   }
 }
 
@@ -47,10 +49,12 @@ const inputCls =
   "mt-1.5 w-full rounded-lg border border-hairline bg-white px-3 py-2 text-sm outline-none focus:border-black/30";
 
 export default async function SettingsPage() {
-  const { ctx, linkedin, email } = await getData();
-  const liName = (linkedin?.metadata as { name?: string } | null)?.name ?? null;
-  const emName = (email?.metadata as { name?: string } | null)?.name ?? null;
+  const { ctx, linkedin, email, accounts } = await getData();
   const unipileOn = isConfigured("unipile");
+  const linkedinAccounts = accounts.filter((a: any) => String(a?.type).toUpperCase() === "LINKEDIN");
+  const emailAccounts = accounts.filter((a: any) =>
+    ["GOOGLE", "MAIL", "OUTLOOK"].includes(String(a?.type).toUpperCase()),
+  );
 
   return (
     <div className="mx-auto max-w-3xl space-y-8">
@@ -154,42 +158,98 @@ export default async function SettingsPage() {
           milestones. Profile lookups are rate-limited (~150/day), so enrichment is priority-first.
         </p>
 
-        <div className="mt-4 flex items-center justify-between text-sm">
-          <span>
-            LinkedIn account{" "}
-            {linkedin ? (
-              <span className="text-good">— linked{liName ? ` (${liName})` : ""}</span>
-            ) : (
-              <span className="text-muted">— not linked</span>
-            )}
-          </span>
-          <form action={linkLinkedInAction}>
-            <button
-              disabled={!unipileOn}
-              className="rounded-lg border border-hairline px-3 py-1.5 text-sm hover:bg-black/[0.03] disabled:opacity-40"
-            >
-              {linkedin ? "Re-link" : "Link LinkedIn"}
-            </button>
-          </form>
+        {/* LinkedIn account picker */}
+        <div className="mt-4">
+          <div className="text-sm font-medium text-ink">LinkedIn account</div>
+          {!unipileOn ? (
+            <p className="mt-1 text-xs text-amber-600">
+              Set UNIPILE_DSN and UNIPILE_API_KEY in Railway to enable.
+            </p>
+          ) : linkedinAccounts.length === 0 ? (
+            <p className="mt-1 text-xs text-muted">
+              No LinkedIn account found in Unipile — connect one in your Unipile dashboard and it will
+              appear here.
+            </p>
+          ) : (
+            <ul className="mt-2 space-y-1.5">
+              {linkedinAccounts.map((a: any) => {
+                const connected = linkedin?.externalId === a.id;
+                return (
+                  <li key={a.id} className="flex items-center justify-between gap-3 text-sm">
+                    <span className="min-w-0 truncate">
+                      {a.name ?? a.id}
+                      {connected && <span className="text-good"> · connected</span>}
+                    </span>
+                    {connected ? (
+                      <form action={disconnectAccount}>
+                        <input type="hidden" name="provider" value="linkedin" />
+                        <button className="shrink-0 rounded-lg border border-hairline px-3 py-1.5 text-rose-500 hover:bg-rose-50">
+                          Disconnect
+                        </button>
+                      </form>
+                    ) : (
+                      <form action={useAccount}>
+                        <input type="hidden" name="provider" value="linkedin" />
+                        <input type="hidden" name="externalId" value={a.id} />
+                        <input type="hidden" name="name" value={a.name ?? ""} />
+                        <input type="hidden" name="type" value={a.type ?? ""} />
+                        <button className="shrink-0 rounded-lg border border-hairline px-3 py-1.5 hover:bg-black/[0.03]">
+                          Use this
+                        </button>
+                      </form>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </div>
 
-        <div className="mt-3 flex items-center justify-between text-sm">
-          <span>
-            Email (Gmail/Outlook){" "}
-            {email ? (
-              <span className="text-good">— linked{emName ? ` (${emName})` : ""}</span>
-            ) : (
-              <span className="text-muted">— not linked</span>
-            )}
-          </span>
-          <form action={linkEmailAction}>
-            <button
-              disabled={!unipileOn}
-              className="rounded-lg border border-hairline px-3 py-1.5 text-sm hover:bg-black/[0.03] disabled:opacity-40"
-            >
-              {email ? "Re-link" : "Link email"}
-            </button>
-          </form>
+        {/* Email account picker */}
+        <div className="mt-4">
+          <div className="text-sm font-medium text-ink">Email account (Gmail/Outlook)</div>
+          {!unipileOn ? (
+            <p className="mt-1 text-xs text-amber-600">
+              Set UNIPILE_DSN and UNIPILE_API_KEY in Railway to enable.
+            </p>
+          ) : emailAccounts.length === 0 ? (
+            <p className="mt-1 text-xs text-muted">
+              No mailbox found in Unipile — connect the inbox you want (e.g. dp@djpcapital.io) in your
+              Unipile dashboard, then choose it here.
+            </p>
+          ) : (
+            <ul className="mt-2 space-y-1.5">
+              {emailAccounts.map((a: any) => {
+                const connected = email?.externalId === a.id;
+                return (
+                  <li key={a.id} className="flex items-center justify-between gap-3 text-sm">
+                    <span className="min-w-0 truncate">
+                      {a.name ?? a.id}
+                      {connected && <span className="text-good"> · connected</span>}
+                    </span>
+                    {connected ? (
+                      <form action={disconnectAccount}>
+                        <input type="hidden" name="provider" value="email" />
+                        <button className="shrink-0 rounded-lg border border-hairline px-3 py-1.5 text-rose-500 hover:bg-rose-50">
+                          Disconnect
+                        </button>
+                      </form>
+                    ) : (
+                      <form action={useAccount}>
+                        <input type="hidden" name="provider" value="email" />
+                        <input type="hidden" name="externalId" value={a.id} />
+                        <input type="hidden" name="name" value={a.name ?? ""} />
+                        <input type="hidden" name="type" value={a.type ?? ""} />
+                        <button className="shrink-0 rounded-lg border border-hairline px-3 py-1.5 hover:bg-black/[0.03]">
+                          Use this
+                        </button>
+                      </form>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </div>
 
         <div className="mt-3 flex items-center justify-between text-sm">

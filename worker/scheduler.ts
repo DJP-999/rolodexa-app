@@ -1,4 +1,4 @@
-import { Queue, Worker } from "bullmq";
+import { Queue, Worker, type ConnectionOptions } from "bullmq";
 import IORedis from "ioredis";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
@@ -74,7 +74,7 @@ function getConnection(): IORedis | null {
 function getQueue(): Queue | null {
   const c = getConnection();
   if (!c) return null;
-  if (!queue) queue = new Queue(QUEUE, { connection: c });
+  if (!queue) queue = new Queue(QUEUE, { connection: c as unknown as ConnectionOptions });
   return queue;
 }
 
@@ -132,7 +132,7 @@ export async function startScheduler(): Promise<void> {
         console.log(`[scheduler] running ${job.name}`);
         await recordRun(job.name, run);
       },
-      { connection: c },
+      { connection: c as unknown as ConnectionOptions },
     );
     worker.on("failed", (job, err) => console.error(`[scheduler] ${job?.name} failed:`, err));
     worker.on("completed", (job) => console.log(`[scheduler] ${job.name} ✓`));
