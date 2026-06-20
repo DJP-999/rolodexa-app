@@ -310,17 +310,44 @@ export default async function ContactProfile({ params }: { params: Promise<{ id:
         <div className="mt-5 rounded-2xl border border-hairline bg-white p-5">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Pending suggestions</h2>
           <div className="mt-3 space-y-3">
-            {sug.map((s) => (
-              <div key={s.id} className="rounded-xl bg-black/[0.02] p-3">
-                <div className="text-sm text-ink">{s.reason}</div>
-                {s.rationale && (
-                  <p className="mt-1.5 text-xs text-amber-700">Why now: {s.rationale}</p>
-                )}
-                {s.draftMessage && (
-                  <p className="mt-1.5 text-sm italic text-muted">&ldquo;{s.draftMessage}&rdquo;</p>
-                )}
-              </div>
-            ))}
+            {sug.map((s) => {
+              const wc = (s.claimIds ?? []).map((id) => cls.find((c) => c.id === id)).find(Boolean);
+              const when = wc?.publishedDate
+                ? `Reported ${fmtDate(wc.publishedDate)}`
+                : wc?.eventDate
+                  ? `Dated ${fmtDate(wc.eventDate)}`
+                  : null;
+              const showWhy = when || wc?.sourceUrl || (s.triggerType === "re_engage" && c.lastContactedAt);
+              return (
+                <div key={s.id} className="rounded-xl bg-black/[0.02] p-3">
+                  <div className="text-sm text-ink">{s.reason}</div>
+                  {showWhy && (
+                    <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
+                      <span className="font-medium uppercase tracking-wide text-amber-700">Why now</span>
+                      {when && <span className="text-muted">{when}</span>}
+                      {wc?.sourceUrl && (
+                        <a
+                          href={wc.sourceUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[#2d6cf6] hover:underline"
+                        >
+                          source
+                        </a>
+                      )}
+                      {!wc && s.triggerType === "re_engage" && c.lastContactedAt && (
+                        <span className="text-muted">
+                          Last contacted {fmtDate(c.lastContactedAt)} ({daysSince(c.lastContactedAt)}d ago)
+                        </span>
+                      )}
+                    </div>
+                  )}
+                  {s.draftMessage && (
+                    <p className="mt-1.5 text-sm italic text-muted">&ldquo;{s.draftMessage}&rdquo;</p>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

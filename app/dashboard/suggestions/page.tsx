@@ -1,11 +1,36 @@
 import { desc, eq, inArray } from "drizzle-orm";
 import Link from "next/link";
-import { Sparkles, Check, Clock, X, Pencil, Lightbulb } from "lucide-react";
+import { Sparkles, Check, Clock, X, Pencil, Calendar, ExternalLink } from "lucide-react";
 import { db } from "@/db";
-import { suggestions, contacts } from "@/db/schema";
+import { suggestions, contacts, claims, type Claim } from "@/db/schema";
 import { approveAction, snoozeAction, dismissAction, generateAction } from "./actions";
 
 export const dynamic = "force-dynamic";
+
+/** Format a date column (string "YYYY-MM-DD") or timestamp into "Jun 12, 2026". */
+function fmtDate(d: string | Date | null | undefined): string | null {
+  if (!d) return null;
+  const dt = typeof d === "string" ? new Date(d.length <= 10 ? `${d}T00:00:00` : d) : d;
+  if (isNaN(dt.getTime())) return null;
+  return dt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+/** Bare domain for a source link, e.g. "techcrunch.com". */
+function domainOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "source";
+  }
+}
+
+/** The factual "when" for a claim: when it was reported, else when it happened, else when we found it. */
+function claimWhen(c: Claim): string | null {
+  if (c.publishedDate) return `Reported ${fmtDate(c.publishedDate)}`;
+  if (c.eventDate) return `Dated ${fmtDate(c.eventDate)}`;
+  if (c.observedAt) return `Detected ${fmtDate(c.observedAt)}`;
+  return null;
+}
 
 const TRIGGER: Record<string, { glyph: string; label: string }> = {
   re_engage: { glyph: "⏰", label: "Re-engage" },
@@ -38,7 +63,28 @@ async function getData(status: string) {
       .limit(50);
     const cs = await db.select().from(contacts);
     const map = new Map(cs.map((c) => [c.id, c]));
-    return sug.map((s) => ({ ...s, contact: s.contactId ? map.get(s.contactId) : undefined }));
+
+    // Pull the sourced claims behind these suggestions so "Why now" can cite them.
+    const allClaimIds = [...new Set(sug.flatMap((s) => s.claimIds ?? []))];
+    const claimMap = new Map<string, Claim>();
+    if (allClaimIds.length) {
+      const cl = await db.select().from(claims).where(inArray(claims.id, allClaimIds));
+      for (const c of cl) claimMap.set(c.id, c);
+    }
+    const pickWhyNow = (ids: string[] | null): Claim | undefined => {
+      const list = (ids ?? []).map((id) => claimMap.get(id)).filter((c): c is Claim => !!c);
+      if (!list.length) return undefined;
+      const dated = list
+        .filter((c) => c.field === "job_change" || c.field === "news")
+        .sort((a, b) => (b.publishedDate ?? b.eventDate ?? "").localeCompare(a.publishedDate ?? a.eventDate ?? ""));
+      return dated[0] ?? list[0];
+    };
+
+    return sug.map((s) => ({
+      ...s,
+      contact: s.contactId ? map.get(s.contactId) : undefined,
+      whyNow: pickWhyNow(s.claimIds),
+    }));
   } catch {
     return null;
   }
@@ -129,14 +175,44 @@ export default async function SuggestionsPage({
 
                 <p className="mt-3 text-sm text-ink">{s.reason}</p>
 
-                {s.rationale && (
-                  <div className="mt-3 rounded-xl border border-amber-200/70 bg-amber-50/60 p-3">
-                    <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-amber-700">
-                      <Lightbulb className="h-3.5 w-3.5" /> Why now
+                {(() => {
+                  // Factual "Why now": the dated, sourced trigger behind this suggestion.
+                  const when = s.whyNow ? claimWhen(s.whyNow) : null;
+                  const url = s.whyNow?.sourceUrl ?? null;
+                  const lastDays =
+                    s.triggerType === "re_engage" && s.contact?.lastContactedAt
+                      ? Math.floor(
+                          (Date.now() - new Date(s.contact.lastContactedAt).getTime()) / 86_400_000,
+                        )
+                      : null;
+                  if (!when && !url && lastDays === null) return null;
+                  return (
+                    <div className="mt-3 rounded-xl border border-amber-200/70 bg-amber-50/60 p-3">
+                      <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-amber-700">
+                        <Calendar className="h-3.5 w-3.5" /> Why now
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-ink/80">
+                        {when && <span>{when}</span>}
+                        {when && url && <span className="text-amber-700/50">·</span>}
+                        {url && (
+                          <a
+                            href={url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 font-medium text-amber-700 hover:underline"
+                          >
+                            {domainOf(url)} <ExternalLink className="h-3 w-3" />
+                          </a>
+                        )}
+                        {lastDays !== null && (
+                          <span>
+                            Last contacted {fmtDate(s.contact?.lastContactedAt) ?? "—"} ({lastDays}d ago)
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <p className="mt-1 text-sm text-ink/80">{s.rationale}</p>
-                  </div>
-                )}
+                  );
+                })()}
 
                 {s.draftMessage && (
                   <div className="mt-3 rounded-xl bg-black/[0.03] p-4">
