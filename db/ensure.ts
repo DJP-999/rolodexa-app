@@ -15,5 +15,7 @@ export async function ensureSchema(sql: {
   await sql.unsafe(
     `ALTER TABLE "user_context" ADD COLUMN IF NOT EXISTS "first_enrich_done" boolean DEFAULT false`,
   );
+  // Lazily-generated contact bio shown on the profile page.
+  await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "summary" text`);
   console.log("[db] ensureSchema applied.");
 }
