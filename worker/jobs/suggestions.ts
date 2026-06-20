@@ -37,7 +37,7 @@ async function draft(opts: {
           (opts.focus ? `\nMy current focus: ${opts.focus}` : ""),
       },
     ],
-    maxTokens: 220,
+    maxTokens: 160,
     temperature: 0.6,
   });
 
@@ -46,11 +46,11 @@ async function draft(opts: {
   const first = opts.name.split(/\s+/)[0] || "there";
   if (opts.fact) {
     return stripEmDashes(
-      `Hey ${first}, congrats on the news, saw it and had to reach out. Let's catch up once things settle, would love to hear how it is going.`,
+      `${first}, congrats on the news! Just saw it and had to say something. We gotta catch up soon, want to hear how it's going.`,
     );
   }
   return stripEmDashes(
-    `Hey ${first}, it has been way too long. No agenda, you just came to mind and I wanted to say hi. Free to catch up sometime soon?`,
+    `${first}, it's been way too long! No agenda, you just came to mind. Free to catch up soon?`,
   );
 }
 

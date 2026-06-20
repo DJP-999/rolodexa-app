@@ -1,15 +1,19 @@
 /**
- * The default voice for every outreach message Dexa drafts: friendly, casual, and
- * peer-to-peer. You already know these people, so it reads like a note to a friend,
- * not a formal email. No filler, no em-dashes.
+ * The default voice for every outreach message Dexa drafts: a quick TEXT MESSAGE
+ * to a friend. Not an email, not a LinkedIn note. Short, warm, casual, peer-to-peer.
+ * No greetings, no sign-offs, no corporate polish, no em-dashes.
  */
 export const TONE_GUIDE =
-  "Voice: warm, friendly, and casual, the way you write to someone you already know and genuinely like. " +
-  "You two are peers with real rapport, so drop all formality and pleasantries. No 'Dear', no 'I hope you are well', no corporate or salesy phrasing, no throat-clearing. " +
-  "Write like a quick, real note to a friend in your world: relaxed, direct, human, with contractions and plain words. A little warmth and personality is good. " +
-  "Get to the point in a friendly way, and cut every piece of filler. " +
+  "Write it like a TEXT MESSAGE to a friend, not an email or a LinkedIn message. " +
+  "You already know this person and you like them, so be warm, casual, and brief, the way you would actually thumb-type on your phone. " +
+  "Keep it to 1 to 3 short sentences. " +
+  "Open like a text using just their first name (for example 'Kevin!' or 'hey Kevin'), never 'Dear', 'Hi there', or a full salutation. " +
+  "No 'I hope you are well', no 'I wanted to reach out', no sign-off, no signature, no subject-line energy. " +
+  "Use contractions and everyday spoken words. Sound like a real person talking, not marketing copy. " +
+  "Cut anything that sounds polished, salesy, or corporate (kill lines like 'a real vote of confidence in what you're building' or 'let me know if'). " +
+  "A little excitement is fine (one exclamation point is plenty). Do not use emojis unless the user's own writing style clearly uses them. " +
   "Hard rule: NEVER use em-dashes or en-dashes (the characters U+2014 or U+2013). Use periods or commas instead. " +
-  "Keep it short. No placeholders, brackets, or notes.";
+  "No filler, no placeholders, no brackets. Just the quick, genuine note you would actually send by text.";
 
 /** Deterministically remove em/en dashes (the model overuses them) and tidy spacing. */
 export function stripEmDashes(s: string): string {
