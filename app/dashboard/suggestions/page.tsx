@@ -1,4 +1,5 @@
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
+import Link from "next/link";
 import { Sparkles, Check, Clock, X, Pencil } from "lucide-react";
 import { db } from "@/db";
 import { suggestions, contacts } from "@/db/schema";
@@ -16,14 +17,24 @@ const PRIORITY: Record<string, string> = {
   medium: "bg-amber-100 text-amber-700",
   low: "bg-black/[0.05] text-muted",
 };
+const TABS: [string, string][] = [
+  ["pending", "Pending"],
+  ["approved", "Approved"],
+  ["snoozed", "Snoozed"],
+  ["dismissed", "Dismissed"],
+];
 
-async function getData() {
+async function getData(status: string) {
   try {
+    const cond =
+      status === "approved"
+        ? inArray(suggestions.status, ["approved", "sent"])
+        : eq(suggestions.status, status as "pending" | "snoozed" | "dismissed");
     const sug = await db
       .select()
       .from(suggestions)
-      .where(eq(suggestions.status, "pending"))
-      .orderBy(desc(suggestions.score))
+      .where(cond)
+      .orderBy(status === "pending" ? desc(suggestions.score) : desc(suggestions.updatedAt))
       .limit(50);
     const cs = await db.select().from(contacts);
     const map = new Map(cs.map((c) => [c.id, c]));
@@ -33,8 +44,24 @@ async function getData() {
   }
 }
 
-export default async function SuggestionsPage() {
-  const rows = await getData();
+const EMPTY: Record<string, string> = {
+  pending: "Nothing pending. The gate stays silent until something clears the bar.",
+  approved: "No approved outreach yet — approve a suggestion to send it.",
+  snoozed: "Nothing snoozed.",
+  dismissed: "Nothing dismissed.",
+};
+
+export default async function SuggestionsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ status?: string }>;
+}) {
+  const sp = await searchParams;
+  const status = ["pending", "approved", "snoozed", "dismissed"].includes(sp.status ?? "")
+    ? (sp.status as string)
+    : "pending";
+  const rows = await getData(status);
+
   return (
     <div className="mx-auto max-w-5xl">
       <div className="flex items-start justify-between">
@@ -52,20 +79,25 @@ export default async function SuggestionsPage() {
       </div>
 
       <div className="mt-5 flex items-center gap-1 text-sm">
-        <span className="rounded-full bg-black/[0.06] px-3 py-1 font-medium text-ink">Pending</span>
-        {["Approved", "Snoozed", "Dismissed"].map((t) => (
-          <span key={t} className="rounded-full px-3 py-1 text-muted">
-            {t}
-          </span>
+        {TABS.map(([key, label]) => (
+          <Link
+            key={key}
+            href={key === "pending" ? "/dashboard/suggestions" : `/dashboard/suggestions?status=${key}`}
+            className={
+              status === key
+                ? "rounded-full bg-black/[0.06] px-3 py-1 font-medium text-ink"
+                : "rounded-full px-3 py-1 text-muted hover:text-ink"
+            }
+          >
+            {label}
+          </Link>
         ))}
       </div>
 
       {!rows ? (
         <p className="mt-8 text-sm text-muted">Connect the database to see suggestions.</p>
       ) : rows.length === 0 ? (
-        <p className="mt-8 text-sm text-muted">
-          Nothing pending. The gate stays silent until something clears the bar.
-        </p>
+        <p className="mt-8 text-sm text-muted">{EMPTY[status]}</p>
       ) : (
         <div className="mt-5 space-y-4">
           {rows.map((s) => {
@@ -111,27 +143,34 @@ export default async function SuggestionsPage() {
                   </div>
                 )}
 
-                <div className="mt-3 flex items-center gap-2 text-sm">
-                  <form action={approveAction}>
-                    <input type="hidden" name="id" value={s.id} />
-                    <button className="flex items-center gap-1.5 rounded-lg bg-black px-3 py-1.5 font-medium text-white hover:bg-black/90">
-                      <Check className="h-4 w-4" /> Approve
-                    </button>
-                  </form>
-                  <form action={snoozeAction}>
-                    <input type="hidden" name="id" value={s.id} />
-                    <button className="flex items-center gap-1.5 rounded-lg border border-hairline px-3 py-1.5 hover:bg-black/[0.03]">
-                      <Clock className="h-4 w-4" /> Snooze 7d
-                    </button>
-                  </form>
-                  <form action={dismissAction}>
-                    <input type="hidden" name="id" value={s.id} />
-                    <button className="flex items-center gap-1.5 px-3 py-1.5 text-muted hover:text-ink">
-                      <X className="h-4 w-4" /> Dismiss
-                    </button>
-                  </form>
-                  <span className="ml-auto text-xs text-muted">{s.intentLabel}</span>
-                </div>
+                {status === "pending" ? (
+                  <div className="mt-3 flex items-center gap-2 text-sm">
+                    <form action={approveAction}>
+                      <input type="hidden" name="id" value={s.id} />
+                      <button className="flex items-center gap-1.5 rounded-lg bg-black px-3 py-1.5 font-medium text-white hover:bg-black/90">
+                        <Check className="h-4 w-4" /> Approve
+                      </button>
+                    </form>
+                    <form action={snoozeAction}>
+                      <input type="hidden" name="id" value={s.id} />
+                      <button className="flex items-center gap-1.5 rounded-lg border border-hairline px-3 py-1.5 hover:bg-black/[0.03]">
+                        <Clock className="h-4 w-4" /> Snooze 7d
+                      </button>
+                    </form>
+                    <form action={dismissAction}>
+                      <input type="hidden" name="id" value={s.id} />
+                      <button className="flex items-center gap-1.5 px-3 py-1.5 text-muted hover:text-ink">
+                        <X className="h-4 w-4" /> Dismiss
+                      </button>
+                    </form>
+                    <span className="ml-auto text-xs text-muted">{s.intentLabel}</span>
+                  </div>
+                ) : (
+                  <div className="mt-3 flex items-center gap-2 text-xs text-muted">
+                    <span className="capitalize">{s.status}</span>
+                    <span className="ml-auto">{s.intentLabel}</span>
+                  </div>
+                )}
               </div>
             );
           })}
