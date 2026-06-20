@@ -2,13 +2,14 @@ import { Queue, Worker } from "bullmq";
 import IORedis from "ioredis";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { jobRuns } from "@/db/schema";
+import { jobRuns, automations } from "@/db/schema";
 import { env } from "@/lib/env";
 import { runEmailPoll } from "./jobs/emailPoll";
 import { runEnrichment } from "./jobs/enrichment";
 import { runRecompute } from "./jobs/recompute";
 import { runSuggestions } from "./jobs/suggestions";
 import { runBrief } from "./jobs/brief";
+import { runAutomation } from "./jobs/automation";
 
 /**
  * The scheduler. Runs in-process with the web server (via instrumentation.ts) so
@@ -98,9 +99,34 @@ export async function startScheduler(): Promise<void> {
       );
     }
 
+    // Register user-defined automations (custom prompts on a cron).
+    try {
+      const autos = await db.select().from(automations).where(eq(automations.enabled, true));
+      for (const a of autos) {
+        await q.add(
+          `auto:${a.id}`,
+          {},
+          {
+            repeat: { pattern: a.cron, tz: a.timezone ?? TZ },
+            jobId: `auto:${a.id}`,
+            removeOnComplete: true,
+            removeOnFail: 20,
+          },
+        );
+      }
+      if (autos.length) console.log(`[scheduler] registered ${autos.length} custom automation(s).`);
+    } catch (e) {
+      console.error("[scheduler] automation load failed", e);
+    }
+
     const worker = new Worker(
       QUEUE,
       async (job) => {
+        if (job.name.startsWith("auto:")) {
+          const id = job.name.slice("auto:".length);
+          await recordRun(job.name, () => runAutomation(id));
+          return;
+        }
         const run = byName.get(job.name);
         if (!run) return;
         console.log(`[scheduler] running ${job.name}`);
@@ -140,4 +166,36 @@ export async function runOnce(name: string): Promise<void> {
   }
   console.log(`[scheduler] manual run: ${name}`);
   await recordRun(name, run);
+}
+
+/** Register a custom automation as a repeatable job (idempotent on jobId). */
+export async function registerAutomation(id: string, cron: string, tz?: string): Promise<void> {
+  const q = getQueue();
+  if (!q) return;
+  try {
+    await q.add(
+      `auto:${id}`,
+      {},
+      { repeat: { pattern: cron, tz: tz ?? TZ }, jobId: `auto:${id}`, removeOnComplete: true, removeOnFail: 20 },
+    );
+  } catch (e) {
+    console.error("[scheduler] registerAutomation", e);
+  }
+}
+
+/** Remove a custom automation's repeatable schedule. */
+export async function unregisterAutomation(id: string): Promise<void> {
+  const q = getQueue();
+  if (!q) return;
+  try {
+    const reps = await q.getRepeatableJobs();
+    for (const r of reps) if (r.name === `auto:${id}`) await q.removeRepeatableByKey(r.key);
+  } catch (e) {
+    console.error("[scheduler] unregisterAutomation", e);
+  }
+}
+
+/** Run a custom automation immediately (inline), logging it like any job. */
+export async function runAutomationOnce(id: string): Promise<void> {
+  await recordRun(`auto:${id}`, () => runAutomation(id));
 }

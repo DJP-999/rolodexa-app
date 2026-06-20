@@ -1,8 +1,9 @@
 import Link from "next/link";
-import { AlarmClock, Cable, Plus, ArrowUp, Sparkles, Clock } from "lucide-react";
+import { AlarmClock, Cable, Plus, Sparkles, Clock } from "lucide-react";
 import { db } from "@/db";
 import { contacts } from "@/db/schema";
 import { ActivityPanel } from "@/components/ActivityPanel";
+import { DexaChat } from "@/components/DexaChat";
 
 export const dynamic = "force-dynamic";
 
@@ -49,19 +50,8 @@ export default async function DashboardHome() {
           <h1 className="text-[34px] font-bold leading-[1.1] tracking-tight">How can I help?</h1>
         </div>
 
-        <div className="mt-3 flex h-[150px] flex-col rounded-[24px] border border-white/70 bg-[#e9eef0]/55 p-5 shadow-sm">
-          <input
-            className="w-full bg-transparent text-[15px] outline-none placeholder:text-muted"
-            placeholder="Assign a task or ask anything"
-          />
-          <div className="mt-auto flex items-center justify-between">
-            <button className="flex h-7 w-7 items-center justify-center rounded-full text-muted transition-colors hover:bg-black/[0.04]">
-              <Plus className="h-5 w-5" strokeWidth={1.75} />
-            </button>
-            <button className="flex h-9 w-9 items-center justify-center rounded-full bg-[#cfe0fb] text-[#2d6cf6] transition-colors hover:bg-[#bcd4fa]">
-              <ArrowUp className="h-[18px] w-[18px]" strokeWidth={2.25} />
-            </button>
-          </div>
+        <div className="mt-3">
+          <DexaChat />
         </div>
 
         {stats && (
