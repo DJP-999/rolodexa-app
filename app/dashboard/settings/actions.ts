@@ -1,10 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { userContext, connectedAccounts } from "@/db/schema";
 import { getPrimaryUser, getConnectedAccount } from "@/lib/user";
+import { createHostedAuthLink } from "@/lib/integrations/unipile";
 import { enqueue, runOnce } from "@/worker/scheduler";
 
 /**
@@ -87,6 +90,26 @@ export async function disconnectAccount(formData: FormData) {
   await db
     .delete(connectedAccounts)
     .where(and(eq(connectedAccounts.userId, user.id), eq(connectedAccounts.provider, provider)));
+  revalidatePath("/dashboard/settings");
+}
+
+/**
+ * Launch Unipile's hosted-auth wizard to connect a NEW account (e.g. the
+ * dp@djpcapital.io mailbox). The user completes the secure flow on Unipile and is
+ * redirected back here, where the new account shows up in the picker. We never
+ * touch their credentials.
+ */
+export async function connectNewAccount() {
+  const h = await headers();
+  const host = h.get("host") ?? "";
+  const base = host ? `https://${host}` : "";
+  const url = await createHostedAuthLink({
+    successUrl: `${base}/dashboard/settings`,
+    failureUrl: `${base}/dashboard/settings`,
+    notifyUrl: `${base}/api/unipile/webhook`,
+    providers: ["GOOGLE", "OUTLOOK", "MAIL", "LINKEDIN"],
+  });
+  if (url) redirect(url);
   revalidatePath("/dashboard/settings");
 }
 

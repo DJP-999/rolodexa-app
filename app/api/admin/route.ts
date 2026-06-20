@@ -45,8 +45,20 @@ export async function GET(req: Request) {
       await runOnce("suggestions");
       return NextResponse.json({ ok: true, action, note: "backdated contacts 60d + generated suggestions" });
     }
+    if (action === "accounts") {
+      // Debug: show exactly what Unipile reports (id/type/name) so we can see why a
+      // mailbox isn't appearing in the picker.
+      const { listAccounts } = await import("@/lib/integrations/unipile");
+      const accounts = await listAccounts();
+      return NextResponse.json({
+        ok: true,
+        action,
+        count: accounts.length,
+        accounts: accounts.map((a: any) => ({ id: a?.id, type: a?.type, name: a?.name })),
+      });
+    }
     return NextResponse.json(
-      { ok: false, error: "unknown action; use seed | run&job=... | demo" },
+      { ok: false, error: "unknown action; use seed | run&job=... | demo | accounts" },
       { status: 400 },
     );
   } catch (e) {

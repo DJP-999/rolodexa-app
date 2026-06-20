@@ -1,7 +1,13 @@
 import { isConfigured } from "@/lib/env";
 import { getPrimaryUser, getUserContextRow, getConnectedAccount } from "@/lib/user";
 import { listAccounts } from "@/lib/integrations/unipile";
-import { saveContextAction, useAccount, disconnectAccount, enrichNowAction } from "./actions";
+import {
+  saveContextAction,
+  useAccount,
+  disconnectAccount,
+  connectNewAccount,
+  enrichNowAction,
+} from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -51,9 +57,11 @@ const inputCls =
 export default async function SettingsPage() {
   const { ctx, linkedin, email, accounts } = await getData();
   const unipileOn = isConfigured("unipile");
+  const MESSAGING = ["LINKEDIN", "WHATSAPP", "INSTAGRAM", "MESSENGER", "TELEGRAM", "TWITTER", "MOBILE"];
   const linkedinAccounts = accounts.filter((a: any) => String(a?.type).toUpperCase() === "LINKEDIN");
-  const emailAccounts = accounts.filter((a: any) =>
-    ["GOOGLE", "MAIL", "OUTLOOK"].includes(String(a?.type).toUpperCase()),
+  // Any non-messaging account is a mailbox (Google, Outlook, IMAP/Mail, iCloud, Exchange, …).
+  const emailAccounts = accounts.filter(
+    (a: any) => !MESSAGING.includes(String(a?.type).toUpperCase()),
   );
 
   return (
@@ -207,15 +215,24 @@ export default async function SettingsPage() {
 
         {/* Email account picker */}
         <div className="mt-4">
-          <div className="text-sm font-medium text-ink">Email account (Gmail/Outlook)</div>
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-medium text-ink">Email account</div>
+            {unipileOn && (
+              <form action={connectNewAccount}>
+                <button className="rounded-lg border border-hairline px-3 py-1.5 text-sm hover:bg-black/[0.03]">
+                  Connect a mailbox
+                </button>
+              </form>
+            )}
+          </div>
           {!unipileOn ? (
             <p className="mt-1 text-xs text-amber-600">
               Set UNIPILE_DSN and UNIPILE_API_KEY in Railway to enable.
             </p>
           ) : emailAccounts.length === 0 ? (
             <p className="mt-1 text-xs text-muted">
-              No mailbox found in Unipile — connect the inbox you want (e.g. dp@djpcapital.io) in your
-              Unipile dashboard, then choose it here.
+              No mailbox connected in Unipile yet. Click Connect a mailbox to add dp@djpcapital.io via
+              Unipile&apos;s secure wizard, then choose it here.
             </p>
           ) : (
             <ul className="mt-2 space-y-1.5">
