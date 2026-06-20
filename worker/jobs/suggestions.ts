@@ -7,7 +7,12 @@ import { complete } from "@/lib/llm";
 
 const TRIGGER_WEIGHT = { re_engage: 0.6, job_change: 0.9, milestone: 0.8 } as const;
 
-/** Draft a short outreach note AS the user, in their learned voice. */
+/** Detects placeholder/meta leaks like "[recent news]" or "Note: ... rewrite it". */
+function hasLeak(s: string): boolean {
+  return /\[[^\]]*\]/.test(s) || /(^|\s)note:/i.test(s) || /\bneeded\b/i.test(s) || /rewrite it/i.test(s);
+}
+
+/** Draft a short outreach note AS the user, in their learned voice — never a placeholder. */
 async function draft(opts: {
   name: string;
   reason: string;
@@ -15,27 +20,39 @@ async function draft(opts: {
   style?: string | null;
   fact?: string;
 }): Promise<string> {
-  return complete({
+  const msg = await complete({
     tier: "strong",
     system:
-      "You write outreach AS THE USER (first person), to be sent from their own account to a contact. " +
-      "Match the user's writing style if one is provided. Keep it SHORT — 2 to 4 sentences. Warm, specific, human. " +
-      "Open by referencing the concrete reason; never lead with an ask. Use the recipient's real first name. " +
-      "No subject line, no placeholders, no meta-commentary about yourself. Never invent facts beyond what is given. " +
-      "Output only the message text." +
+      "You write outreach AS THE USER (first person), to send from their own account to a contact. " +
+      "Match the user's writing style if provided. Keep it SHORT — 2 to 4 sentences. Warm, human, specific. " +
+      "Use the recipient's real first name; never lead with an ask. " +
+      "CRITICAL: never output placeholders, square brackets, or notes to the user (e.g. [recent news], [detail needed], 'Note: ...'). " +
+      "If a concrete detail is provided, reference it naturally. If NOT, write a genuine relationship-based check-in (it's been a while, they came to mind, hope things are going well) WITHOUT referencing any specific event you don't actually know. " +
+      "Never invent facts. Output ONLY the final message text, ready to send." +
       (opts.style ? `\n\nUSER WRITING STYLE:\n${opts.style}` : ""),
     messages: [
       {
         role: "user",
         content:
           `Recipient: ${opts.name}\nWhy I'm reaching out: ${opts.reason}` +
-          (opts.fact ? `\nConcrete detail to reference: ${opts.fact}` : "") +
+          (opts.fact
+            ? `\nConcrete detail to reference: ${opts.fact}`
+            : "\n(No specific detail available — write a sincere check-in; do NOT invent or reference any specific event.)") +
           (opts.focus ? `\nMy current focus (mention only if it fits naturally): ${opts.focus}` : ""),
       },
     ],
     maxTokens: 220,
-    temperature: 0.6,
+    temperature: 0.5,
   });
+
+  if (msg && msg.length > 0 && !msg.startsWith("[llm-stub") && !hasLeak(msg)) return msg;
+
+  // Deterministic, placeholder-free fallback so nothing half-written ever ships.
+  const first = opts.name.split(/\s+/)[0] || "there";
+  if (opts.fact) {
+    return `Congrats on the move, ${first} — saw the news and wanted to reach out. Would love to hear how the new chapter is going once you're settled. Open to a quick call sometime?`;
+  }
+  return `Hi ${first} — it's been a while and you came to mind. I wanted to check in and see how things are going on your end; no agenda, just overdue for a proper catch-up. Would you be open to a quick call sometime?`;
 }
 
 async function alreadyPending(userId: string, contactId: string, trigger: string): Promise<boolean> {
