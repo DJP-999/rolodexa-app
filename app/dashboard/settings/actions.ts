@@ -82,6 +82,38 @@ export async function linkLinkedInAction() {
   revalidatePath("/dashboard/settings");
 }
 
+/**
+ * Link the user's Gmail/Outlook account connected in Unipile (type GOOGLE/MAIL/
+ * OUTLOOK) so email message history flows into interactions.
+ */
+export async function linkEmailAction() {
+  const user = await getPrimaryUser();
+  if (!user) return;
+
+  const accounts = await listAccounts();
+  const em = accounts.find((a: any) =>
+    ["GOOGLE", "MAIL", "OUTLOOK"].includes(String(a?.type).toUpperCase()),
+  );
+  if (!em?.id) {
+    revalidatePath("/dashboard/settings");
+    return;
+  }
+
+  const existing = await getConnectedAccount(user.id, "email");
+  const metadata = { name: em.name ?? null, type: em.type ?? null };
+  if (existing) {
+    await db
+      .update(connectedAccounts)
+      .set({ externalId: em.id, metadata })
+      .where(eq(connectedAccounts.id, existing.id));
+  } else {
+    await db
+      .insert(connectedAccounts)
+      .values({ userId: user.id, provider: "email", externalId: em.id, metadata });
+  }
+  revalidatePath("/dashboard/settings");
+}
+
 /** Kick off an enrichment pass now (background via the queue). */
 export async function enrichNowAction() {
   await enqueue("enrichment");

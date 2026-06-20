@@ -1,6 +1,6 @@
 import { isConfigured } from "@/lib/env";
 import { getPrimaryUser, getUserContextRow, getConnectedAccount } from "@/lib/user";
-import { saveContextAction, linkLinkedInAction, enrichNowAction } from "./actions";
+import { saveContextAction, linkLinkedInAction, linkEmailAction, enrichNowAction } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -31,14 +31,15 @@ function Status({ on }: { on: boolean }) {
 async function getData() {
   try {
     const user = await getPrimaryUser();
-    if (!user) return { ctx: null, linkedin: null };
-    const [ctx, linkedin] = await Promise.all([
+    if (!user) return { ctx: null, linkedin: null, email: null };
+    const [ctx, linkedin, email] = await Promise.all([
       getUserContextRow(user.id),
       getConnectedAccount(user.id, "linkedin"),
+      getConnectedAccount(user.id, "email"),
     ]);
-    return { ctx, linkedin };
+    return { ctx, linkedin, email };
   } catch {
-    return { ctx: null, linkedin: null };
+    return { ctx: null, linkedin: null, email: null };
   }
 }
 
@@ -46,8 +47,9 @@ const inputCls =
   "mt-1.5 w-full rounded-lg border border-hairline bg-white px-3 py-2 text-sm outline-none focus:border-black/30";
 
 export default async function SettingsPage() {
-  const { ctx, linkedin } = await getData();
+  const { ctx, linkedin, email } = await getData();
   const liName = (linkedin?.metadata as { name?: string } | null)?.name ?? null;
+  const emName = (email?.metadata as { name?: string } | null)?.name ?? null;
   const unipileOn = isConfigured("unipile");
 
   return (
@@ -153,6 +155,25 @@ export default async function SettingsPage() {
               className="rounded-lg border border-hairline px-3 py-1.5 text-sm hover:bg-black/[0.03] disabled:opacity-40"
             >
               {linkedin ? "Re-link" : "Link LinkedIn"}
+            </button>
+          </form>
+        </div>
+
+        <div className="mt-3 flex items-center justify-between text-sm">
+          <span>
+            Email (Gmail/Outlook){" "}
+            {email ? (
+              <span className="text-good">— linked{emName ? ` (${emName})` : ""}</span>
+            ) : (
+              <span className="text-muted">— not linked</span>
+            )}
+          </span>
+          <form action={linkEmailAction}>
+            <button
+              disabled={!unipileOn}
+              className="rounded-lg border border-hairline px-3 py-1.5 text-sm hover:bg-black/[0.03] disabled:opacity-40"
+            >
+              {email ? "Re-link" : "Link email"}
             </button>
           </form>
         </div>

@@ -1,22 +1,44 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { contacts, connectedAccounts } from "@/db/schema";
+import { contacts, connectedAccounts, interactions } from "@/db/schema";
 import { env, isConfigured } from "@/lib/env";
 import { search } from "@/lib/integrations/exa";
-import { getAllRelations } from "@/lib/integrations/unipile";
+import { getAllRelations, getChats, getChatMessages, getEmails } from "@/lib/integrations/unipile";
 import { writeClaim } from "@/lib/provenance/claims";
 import { complete } from "@/lib/llm";
 import { runRecompute } from "./recompute";
 
+type Contact = typeof contacts.$inferSelect;
+
 const norm = (s: string) => s.trim().toLowerCase();
 const today = () => new Date().toISOString().slice(0, 10);
 
-/**
- * Parse a LinkedIn headline conservatively. We only trust the unambiguous
- * "Title at Company" pattern (a single ' at ', no other separators) so messy
- * multi-part headlines never produce a false employer — false job-change alerts
- * are exactly the trust-killer we're avoiding.
- */
+const TITLES = new Set([
+  "dr", "mr", "mrs", "ms", "prof", "jr", "sr", "ii", "iii", "iv", "phd", "cfa", "mba", "esq",
+]);
+
+/** Normalize a name to first+last, accent/title/suffix-insensitive, for fuzzy matching. */
+function nameKey(name: string): string {
+  const t = name
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z\s]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w && !TITLES.has(w));
+  if (t.length === 0) return "";
+  if (t.length === 1) return t[0];
+  return `${t[0]} ${t[t.length - 1]}`;
+}
+
+/** Extract the LinkedIn vanity slug (/in/<slug>) from any URL form. */
+function linkedinSlug(url?: string | null): string | null {
+  if (!url) return null;
+  const m = url.toLowerCase().match(/\/in\/([^/?#]+)/);
+  return m ? decodeURIComponent(m[1]).replace(/\/+$/, "") : null;
+}
+
+/** Only trust "Title at Company" (single ' at ', no other separators) — no false employers. */
 function parseHeadline(headline?: string | null): { title: string | null; company: string | null } {
   if (!headline) return { title: null, company: null };
   const h = headline.trim();
@@ -27,7 +49,6 @@ function parseHeadline(headline?: string | null): { title: string | null; compan
   return { title: h || null, company: null };
 }
 
-/** A genuine employer change — not a re-phrasing or sub/superset of the same name. */
 function isRealChange(oldC: string | null, newC: string | null): boolean {
   if (!oldC || !newC) return false;
   const a = norm(oldC);
@@ -37,68 +58,48 @@ function isRealChange(oldC: string | null, newC: string | null): boolean {
   return true;
 }
 
-/** Batched cheap-model categorization into relationship boxes. */
-async function categorize(
-  batch: { id: string; name: string; company: string | null; role: string | null }[],
-): Promise<Record<string, string>> {
-  if (!batch.length) return {};
-  const valid = new Set(["family", "friend", "coworker", "investor", "vendor", "other"]);
-  const raw = await complete({
-    tier: "cheap",
-    system:
-      "You categorize professional contacts for a relationship-first dealmaker (pre-IPO secondaries, lower-middle-market buyouts). " +
-      "Categories: family, friend, coworker, investor, vendor, other. " +
-      "investor = capital allocators: LPs, family offices, VCs, PE, wealth/asset managers, angels. " +
-      "vendor = service providers selling to the user. Use 'other' when unsure. Return JSON only.",
-    messages: [
-      {
-        role: "user",
-        content:
-          `Assign each contact a category. Return a JSON array of {"id","category"} only.\n` +
-          JSON.stringify(batch),
-      },
-    ],
-    maxTokens: 1800,
-    temperature: 0,
-  });
-  try {
-    const arr = JSON.parse(raw.match(/\[[\s\S]*\]/)?.[0] ?? "[]");
-    const out: Record<string, string> = {};
-    for (const x of arr) if (x?.id && valid.has(x.category)) out[x.id] = x.category;
-    return out;
-  } catch {
-    return {};
-  }
-}
-
-/** LinkedIn relations match for one user: fill company/role, flag job changes. */
-async function matchLinkedIn(userId: string, list: (typeof contacts.$inferSelect)[]): Promise<void> {
-  const li = (
+async function accountId(userId: string, provider: string): Promise<string | null> {
+  const a = (
     await db
       .select()
       .from(connectedAccounts)
-      .where(and(eq(connectedAccounts.userId, userId), eq(connectedAccounts.provider, "linkedin")))
+      .where(and(eq(connectedAccounts.userId, userId), eq(connectedAccounts.provider, provider)))
       .limit(1)
   )[0];
-  if (!li?.externalId || !isConfigured("unipile")) return;
+  return a?.externalId ?? null;
+}
 
-  const relations = await getAllRelations(li.externalId);
-  const byUrl = new Map<string, any>();
+/** Match contacts to the user's LinkedIn network (slug first, then fuzzy name). Returns member_id → contactId. */
+async function matchLinkedIn(
+  userId: string,
+  list: Contact[],
+  liId: string | null,
+): Promise<Map<string, string>> {
+  const providerToContact = new Map<string, string>();
+  if (!liId || !isConfigured("unipile")) return providerToContact;
+
+  const relations = await getAllRelations(liId);
+  const bySlug = new Map<string, any>();
   const byName = new Map<string, any>();
   for (const r of relations) {
-    const url = (r.public_profile_url ?? "").toLowerCase().replace(/\/+$/, "");
-    if (url) byUrl.set(url, r);
-    const nm = norm(`${r.first_name ?? ""} ${r.last_name ?? ""}`);
-    if (nm) byName.set(nm, r);
+    const slug =
+      (r.public_identifier ? String(r.public_identifier).toLowerCase() : null) ??
+      linkedinSlug(r.public_profile_url);
+    if (slug) bySlug.set(slug, r);
+    const nk = nameKey(`${r.first_name ?? ""} ${r.last_name ?? ""}`);
+    if (nk) byName.set(nk, r);
   }
 
   let matched = 0;
   for (const c of list) {
     let r: any = null;
-    if (c.linkedinUrl) r = byUrl.get(c.linkedinUrl.toLowerCase().replace(/\/+$/, ""));
-    if (!r) r = byName.get(norm(c.name));
+    const cslug = linkedinSlug(c.linkedinUrl);
+    if (cslug) r = bySlug.get(cslug);
+    if (!r) r = byName.get(nameKey(c.name));
     if (!r) continue;
     matched++;
+    if (r.member_id) providerToContact.set(String(r.member_id), c.id);
+
     const { title, company } = parseHeadline(r.headline);
     if (company && isRealChange(c.company, company)) {
       await writeClaim({
@@ -114,7 +115,7 @@ async function matchLinkedIn(userId: string, list: (typeof contacts.$inferSelect
     await db
       .update(contacts)
       .set({
-        linkedinUrl: c.linkedinUrl ?? r.public_profile_url ?? null,
+        linkedinUrl: r.public_profile_url ?? c.linkedinUrl ?? null,
         company: company ?? c.company,
         role: title ?? c.role,
         isVerifiedPerson: true,
@@ -123,54 +124,178 @@ async function matchLinkedIn(userId: string, list: (typeof contacts.$inferSelect
       })
       .where(eq(contacts.id, c.id));
   }
-  console.log(`[enrichment] LinkedIn matched ${matched}/${list.length} for user ${userId}`);
+  console.log(`[enrichment] LinkedIn matched ${matched}/${list.length} for ${userId}`);
+  return providerToContact;
+}
+
+/** Sync recent LinkedIn conversations into interactions (idempotent) → real last-contacted + reply signal. */
+async function syncLinkedInMessages(
+  userId: string,
+  liId: string,
+  providerToContact: Map<string, string>,
+): Promise<void> {
+  if (providerToContact.size === 0) return;
+  const chats = await getChats(liId);
+  let n = 0;
+  for (const chat of chats.slice(0, 60)) {
+    const pid = chat?.attendee_provider_id ? String(chat.attendee_provider_id) : null;
+    const contactId = pid ? providerToContact.get(pid) : undefined;
+    if (!contactId || !chat?.id) continue;
+    const msgs = await getChatMessages(String(chat.id));
+    for (const m of msgs.slice(0, 25)) {
+      if (!m?.id || !m?.timestamp) continue;
+      const when = new Date(m.timestamp);
+      if (isNaN(when.getTime())) continue;
+      await db
+        .insert(interactions)
+        .values({
+          userId,
+          contactId,
+          eventType: m.is_sender ? "message_out" : "message_in",
+          direction: m.is_sender ? "outbound" : "inbound",
+          channel: "linkedin",
+          occurredAt: when,
+          sourceRef: String(m.id),
+          metadata: { text: typeof m.text === "string" ? m.text.slice(0, 200) : null },
+        })
+        .onConflictDoNothing();
+    }
+    n++;
+  }
+  console.log(`[enrichment] LinkedIn messages synced across ${n} chats`);
+}
+
+/** Sync recent email into interactions (idempotent), matched to contacts by address. */
+async function syncEmail(userId: string, emailId: string): Promise<void> {
+  const cs = await db
+    .select({ id: contacts.id, email: contacts.email })
+    .from(contacts)
+    .where(eq(contacts.userId, userId));
+  const emailToContact = new Map<string, string>();
+  for (const c of cs) if (c.email) emailToContact.set(c.email.toLowerCase(), c.id);
+  if (emailToContact.size === 0) return;
+
+  const emails = await getEmails(emailId, 200);
+  let n = 0;
+  for (const e of emails) {
+    const fromAddr = norm(String(e?.from_attendee?.identifier ?? e?.from_attendee?.email ?? ""));
+    const tos: string[] = Array.isArray(e?.to_attendees)
+      ? e.to_attendees.map((a: any) => norm(String(a?.identifier ?? a?.email ?? "")))
+      : [];
+    let contactId: string | undefined;
+    let inbound = true;
+    if (fromAddr && emailToContact.has(fromAddr)) {
+      contactId = emailToContact.get(fromAddr);
+      inbound = true;
+    } else {
+      for (const t of tos) {
+        if (emailToContact.has(t)) {
+          contactId = emailToContact.get(t);
+          inbound = false;
+          break;
+        }
+      }
+    }
+    if (!contactId || !e?.id) continue;
+    const when = e?.date ? new Date(e.date) : null;
+    if (!when || isNaN(when.getTime())) continue;
+    await db
+      .insert(interactions)
+      .values({
+        userId,
+        contactId,
+        eventType: inbound ? "email_in" : "email_out",
+        direction: inbound ? "inbound" : "outbound",
+        channel: "nylas_email",
+        occurredAt: when,
+        sourceRef: String(e.id),
+        metadata: { subject: typeof e.subject === "string" ? e.subject.slice(0, 200) : null },
+      })
+      .onConflictDoNothing();
+    n++;
+  }
+  console.log(`[enrichment] email synced ${n} messages`);
+}
+
+/** Batched cheap-model categorization into relationship boxes for one user. */
+async function categorizeUser(userId: string): Promise<void> {
+  const refreshed = await db.select().from(contacts).where(eq(contacts.userId, userId));
+  const need = refreshed.filter(
+    (c) => (!c.relationship || c.relationship === "other") && (c.company || c.role),
+  );
+  const valid = new Set(["family", "friend", "coworker", "investor", "vendor", "other"]);
+  for (let i = 0; i < need.length && i < 300; i += 50) {
+    const slice = need.slice(i, i + 50).map((c) => ({
+      id: c.id,
+      name: c.name,
+      company: c.company,
+      role: c.role,
+    }));
+    const raw = await complete({
+      tier: "cheap",
+      system:
+        "You categorize professional contacts for a relationship-first dealmaker (pre-IPO secondaries, lower-middle-market buyouts). " +
+        "Categories: family, friend, coworker, investor, vendor, other. " +
+        "investor = capital allocators: LPs, family offices, VCs, PE, wealth/asset managers, angels. " +
+        "vendor = service providers selling to the user. Use 'other' when unsure. Return JSON only.",
+      messages: [
+        {
+          role: "user",
+          content:
+            `Assign each contact a category. Return a JSON array of {"id","category"} only.\n` +
+            JSON.stringify(slice),
+        },
+      ],
+      maxTokens: 1800,
+      temperature: 0,
+    });
+    try {
+      const arr = JSON.parse(raw.match(/\[[\s\S]*\]/)?.[0] ?? "[]");
+      for (const x of arr) {
+        if (x?.id && valid.has(x.category)) {
+          await db
+            .update(contacts)
+            .set({ relationship: x.category as Contact["relationship"] })
+            .where(eq(contacts.id, x.id));
+        }
+      }
+    } catch {
+      /* skip bad batch */
+    }
+  }
 }
 
 /**
- * Enrichment pass. Cheap/bulk first (LinkedIn relations match + categorization),
- * then re-grade, then the rationed paid step (Exa for priority contacts only).
+ * Enrichment pass. Cheap/bulk first (LinkedIn match + message/email sync +
+ * categorization), then re-grade, then the rationed paid step (Exa for priority).
  * Runs nightly and on demand; every integration degrades cleanly when unset.
  */
 export async function runEnrichment(): Promise<void> {
   const all = await db.select().from(contacts);
   if (!all.length) return;
 
-  const byUser = new Map<string, (typeof contacts.$inferSelect)[]>();
+  const byUser = new Map<string, Contact[]>();
   for (const c of all) {
     const l = byUser.get(c.userId) ?? [];
     l.push(c);
     byUser.set(c.userId, l);
   }
 
-  // --- Phase A + categorization (cheap) ---
   for (const [userId, list] of byUser) {
-    await matchLinkedIn(userId, list);
+    const liId = await accountId(userId, "linkedin");
+    const providerToContact = await matchLinkedIn(userId, list, liId);
+    if (liId) await syncLinkedInMessages(userId, liId, providerToContact);
 
-    const refreshed = await db.select().from(contacts).where(eq(contacts.userId, userId));
-    const need = refreshed.filter(
-      (c) => (!c.relationship || c.relationship === "other") && (c.company || c.role),
-    );
-    for (let i = 0; i < need.length && i < 300; i += 50) {
-      const slice = need.slice(i, i + 50).map((c) => ({
-        id: c.id,
-        name: c.name,
-        company: c.company,
-        role: c.role,
-      }));
-      const cats = await categorize(slice);
-      for (const [id, cat] of Object.entries(cats)) {
-        await db
-          .update(contacts)
-          .set({ relationship: cat as (typeof contacts.$inferInsert)["relationship"] })
-          .where(eq(contacts.id, id));
-      }
-    }
+    const emailId = await accountId(userId, "email");
+    if (emailId) await syncEmail(userId, emailId);
+
+    await categorizeUser(userId);
   }
 
-  // --- Re-grade with the freshly filled data + context, so priority is meaningful ---
+  // Re-grade with filled data + real interactions, so relevance + last-contacted are meaningful.
   await runRecompute();
 
-  // --- Phase C: Exa public milestones for the now-ranked priority set (count-bounded) ---
+  // Phase C: Exa public milestones for the now-ranked priority set (count-bounded).
   if (isConfigured("exa")) {
     const graded = await db.select().from(contacts);
     const priority = graded

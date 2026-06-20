@@ -157,3 +157,16 @@ export async function getChatAttendees(chatId: string): Promise<any[]> {
     return [];
   }
 }
+
+/** Recent emails for a connected mail account (Gmail/Outlook), newest first. */
+export async function getEmails(accountId: string, limit = 200): Promise<any[]> {
+  const client = await getClient();
+  if (!client) return [];
+  try {
+    const res: any = await client.email.getAll({ account_id: accountId, limit });
+    return res?.items ?? res?.data ?? [];
+  } catch (e) {
+    console.error("[unipile] getEmails", e);
+    return [];
+  }
+}
