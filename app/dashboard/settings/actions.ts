@@ -50,13 +50,24 @@ export async function saveContextAction(formData: FormData) {
     await db.select().from(userContext).where(eq(userContext.userId, user.id)).limit(1)
   )[0];
 
+  // Track whether the writing style is a hand edit (manual) or left to Dexa (auto).
+  // Clearing the field resumes auto-learning; editing it pins the user's own wording.
+  const styleVal = values.writingStyle;
+  const styleChanged = styleVal !== (existing?.writingStyle ?? null);
+  const styleFields =
+    styleVal === null
+      ? { writingStyleSource: "auto", writingStyleSamples: 0, writingStyleUpdatedAt: null }
+      : styleChanged
+        ? { writingStyleSource: "manual", writingStyleUpdatedAt: new Date() }
+        : {};
+
   if (existing) {
     await db
       .update(userContext)
-      .set({ ...values, updatedAt: new Date() })
+      .set({ ...values, ...styleFields, updatedAt: new Date() })
       .where(eq(userContext.userId, user.id));
   } else {
-    await db.insert(userContext).values({ userId: user.id, ...values });
+    await db.insert(userContext).values({ userId: user.id, ...values, ...styleFields });
   }
 
   await runOnce("recompute");
@@ -232,7 +243,13 @@ export async function resetAllDataAction(formData: FormData) {
   await db.delete(contacts).where(eq(contacts.userId, user.id));
   await db
     .update(userContext)
-    .set({ firstEnrichDone: false, writingStyle: null })
+    .set({
+      firstEnrichDone: false,
+      writingStyle: null,
+      writingStyleSource: "auto",
+      writingStyleSamples: 0,
+      writingStyleUpdatedAt: null,
+    })
     .where(eq(userContext.userId, user.id));
   revalidatePath("/dashboard/settings");
   revalidatePath("/dashboard/contacts");

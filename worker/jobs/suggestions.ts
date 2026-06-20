@@ -27,7 +27,9 @@ async function draft(opts: {
       "You write outreach AS THE USER (first person), to someone they ALREADY KNOW. " +
       TONE_GUIDE +
       " Use the recipient's real first name. Reference the concrete detail if given; if not, a genuine friendly hello with no invented specifics. Never invent facts. Output ONLY the message text." +
-      (opts.style ? `\n\nMatch how the user writes:\n${opts.style}` : ""),
+      (opts.style
+        ? `\n\nKeep the short text-message format above, but write in the user's own voice, their word choice, warmth, and characteristic phrasing (ignore any email greetings or sign-offs from this profile):\n${opts.style}`
+        : ""),
     messages: [
       {
         role: "user",

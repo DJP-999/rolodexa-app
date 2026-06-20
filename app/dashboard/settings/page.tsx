@@ -243,7 +243,17 @@ export default async function SettingsPage() {
           </label>
           <label className="block">
             <span className="text-sm font-medium text-ink">Writing style</span>
-            <span className="block text-xs text-muted">Auto-learned from your sent messages; edit to taste.</span>
+            <span className="block text-xs text-muted">
+              {ctx?.writingStyleSource === "manual"
+                ? "Manual override. Dexa will not change this. Clear the box to let Dexa learn from your messages again."
+                : (ctx?.writingStyleSamples ?? 0) > 0
+                  ? `Auto-learned from ${ctx?.writingStyleSamples} of your sent messages${
+                      ctx?.writingStyleUpdatedAt
+                        ? `, updated ${new Date(ctx.writingStyleUpdatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`
+                        : ""
+                    }. It keeps sharpening as you send more. Edit to override.`
+                  : "Dexa learns this from your sent emails and LinkedIn messages as they sync. Or write your own."}
+            </span>
             <textarea name="writingStyle" defaultValue={ctx?.writingStyle ?? ""} rows={3} className={inputCls} />
           </label>
           <label className="block">

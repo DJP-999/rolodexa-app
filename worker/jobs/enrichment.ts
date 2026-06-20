@@ -307,6 +307,26 @@ async function syncLinkedInMessages(
   console.log(`[enrichment] LinkedIn messages synced across ${n} chats`);
 }
 
+/** Best-effort plain-text snippet of an email body, stripped of HTML and quoted replies. */
+function emailSnippet(e: any): string | null {
+  const plain = typeof e?.body_plain === "string" ? e.body_plain : null;
+  const html = typeof e?.body === "string" ? e.body : null;
+  const snip = typeof e?.snippet === "string" ? e.snippet : null;
+  let txt = plain ?? snip ?? (html ? html.replace(/<[^>]+>/g, " ") : "");
+  if (!txt) return null;
+  txt = txt
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+  // Trim quoted reply chains / forwarded headers so we only learn from what the user actually wrote.
+  const cut = txt.search(/On .{0,80} wrote:|-----Original Message-----|From:\s/);
+  if (cut > 40) txt = txt.slice(0, cut).trim();
+  return txt ? txt.slice(0, 280) : null;
+}
+
 async function syncEmail(userId: string, emailId: string): Promise<void> {
   const cs = await db
     .select({ id: contacts.id, email: contacts.email })
@@ -350,7 +370,11 @@ async function syncEmail(userId: string, emailId: string): Promise<void> {
         channel: "nylas_email",
         occurredAt: when,
         sourceRef: String(e.id),
-        metadata: { subject: typeof e.subject === "string" ? e.subject.slice(0, 200) : null },
+        metadata: {
+          subject: typeof e.subject === "string" ? e.subject.slice(0, 200) : null,
+          // Only the user's own sent prose feeds writing-style learning; skip inbound bodies.
+          ...(inbound ? {} : { text: emailSnippet(e) }),
+        },
       })
       .onConflictDoNothing();
     n++;

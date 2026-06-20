@@ -21,5 +21,15 @@ export async function ensureSchema(sql: {
   await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "profile_data" jsonb`);
   // Why-this-why-now reasoning shown with each suggestion.
   await sql.unsafe(`ALTER TABLE "suggestions" ADD COLUMN IF NOT EXISTS "rationale" text`);
+  // Writing-style learning state: auto vs manual, how many samples it learned from, and when.
+  await sql.unsafe(
+    `ALTER TABLE "user_context" ADD COLUMN IF NOT EXISTS "writing_style_source" text DEFAULT 'auto'`,
+  );
+  await sql.unsafe(
+    `ALTER TABLE "user_context" ADD COLUMN IF NOT EXISTS "writing_style_samples" integer DEFAULT 0`,
+  );
+  await sql.unsafe(
+    `ALTER TABLE "user_context" ADD COLUMN IF NOT EXISTS "writing_style_updated_at" timestamptz`,
+  );
   console.log("[db] ensureSchema applied.");
 }

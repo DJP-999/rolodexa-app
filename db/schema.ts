@@ -19,6 +19,8 @@ export const userContext = pgTable("user_context", {
   role: text("role"), currentFocus: text("current_focus"), priorityConnections: text("priority_connections"),
   activeProjects: text("active_projects"), painPoints: jsonb("pain_points").$type<string[]>().default([]),
   timezone: text("timezone").default("America/New_York"), writingStyle: text("writing_style"), firstEnrichDone: boolean("first_enrich_done").default(false),
+  writingStyleSource: text("writing_style_source").default("auto"), writingStyleSamples: integer("writing_style_samples").default(0),
+  writingStyleUpdatedAt: timestamp("writing_style_updated_at", { withTimezone: true }),
   weights: jsonb("weights").$type<{professional:number;recency:number;relationship:number;geographic:number;trigger:number;replyPropensity:number}>().default({professional:30,recency:25,relationship:20,geographic:15,trigger:10,replyPropensity:0}),
   observationUntil: date("observation_until"),
   maxNudgesPerDay: integer("max_nudges_per_day").default(3),

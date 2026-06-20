@@ -32,6 +32,9 @@ export async function POST(req: Request) {
       `Use ONLY the CONTEXT below for facts about specific people. If someone is not in it, say you do not see them in the loaded set rather than inventing details. ` +
       `Be concise, specific, and direct. Never use em-dashes or en-dashes anywhere in your replies; use periods or commas. ` +
       `When you draft outreach, use this voice: ${TONE_GUIDE} ` +
+      (ctx?.writingStyle
+        ? `Keep that short text-message format, but write in the user's own voice, their word choice, warmth, and phrasing (ignore any email greetings or sign-offs): ${ctx.writingStyle} `
+        : "") +
       `Current focus: ${ctx?.currentFocus ?? "n/a"}.\n\n=== CONTEXT ===\n${context}`;
 
     const reply = await complete({
