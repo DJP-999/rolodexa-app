@@ -6,8 +6,8 @@ import {
   useAccount,
   disconnectAccount,
   connectNewAccount,
-  enrichNowAction,
 } from "./actions";
+import { EnrichButton } from "./EnrichButton";
 
 export const dynamic = "force-dynamic";
 
@@ -271,11 +271,7 @@ export default async function SettingsPage() {
 
         <div className="mt-3 flex items-center justify-between text-sm">
           <span>Run enrichment now (background, priority-first)</span>
-          <form action={enrichNowAction}>
-            <button className="rounded-lg bg-black px-3 py-1.5 text-sm font-medium text-white hover:bg-black/90">
-              Enrich now
-            </button>
-          </form>
+          <EnrichButton />
         </div>
 
         {!unipileOn && (
