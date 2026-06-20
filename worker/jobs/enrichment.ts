@@ -157,50 +157,118 @@ async function matchLinkedIn(
   return { providerToContact, candidates };
 }
 
-/**
- * Date job-change candidates via a rate-limited profile lookup. Updates the
- * contact's company to the authoritative current one, and ONLY writes a dated
- * job_change claim when the current position's start date is inside the window.
- */
-async function dateJobChanges(
-  liId: string,
-  candidates: Candidate[],
-  windowDays: number,
-  byId: Map<string, Contact>,
-): Promise<void> {
-  candidates.sort(
-    (a, b) => (byId.get(b.contactId)?.relevance ?? 0) - (byId.get(a.contactId)?.relevance ?? 0),
-  );
-  let used = 0;
-  let flagged = 0;
-  for (const cand of candidates) {
-    if (used >= env.ENRICH_DAILY_LINKEDIN_CAP) break;
-    if (!cand.identifier) {
-      await db.update(contacts).set({ company: cand.newCompany }).where(eq(contacts.id, cand.contactId));
-      continue;
-    }
-    const profile = await getProfile(liId, cand.identifier, ["experience"]);
-    used++;
-    const exp: any[] = profile?.work_experience ?? [];
-    const current = exp.find((e) => e?.current) ?? exp[0];
-    const newCompany = (typeof current?.company === "string" && current.company) || cand.newCompany;
-    await db.update(contacts).set({ company: newCompany }).where(eq(contacts.id, cand.contactId));
+/** Normalize a Unipile profile into the compact shape the profile page renders. */
+function normalizeProfile(p: any): Record<string, unknown> {
+  const experience = Array.isArray(p?.work_experience)
+    ? p.work_experience
+        .map((e: any) => ({
+          company: typeof e?.company === "string" ? e.company : null,
+          position: typeof e?.position === "string" ? e.position : null,
+          location: typeof e?.location === "string" ? e.location : null,
+          start: typeof e?.start === "string" ? e.start : null,
+          end: typeof e?.end === "string" ? e.end : null,
+          current: Boolean(e?.current),
+        }))
+        .slice(0, 10)
+    : [];
+  const education = Array.isArray(p?.education)
+    ? p.education
+        .map((e: any) => ({
+          school:
+            typeof e?.school === "string" ? e.school : typeof e?.name === "string" ? e.name : null,
+          degree: typeof e?.degree === "string" ? e.degree : null,
+          field:
+            typeof e?.field_of_study === "string"
+              ? e.field_of_study
+              : typeof e?.field === "string"
+                ? e.field
+                : null,
+          start: typeof e?.start === "string" ? e.start : null,
+          end: typeof e?.end === "string" ? e.end : null,
+        }))
+        .slice(0, 6)
+    : [];
+  const skills = Array.isArray(p?.skills)
+    ? p.skills.map((s: any) => (typeof s === "string" ? s : s?.name)).filter(Boolean).slice(0, 18)
+    : [];
+  const about =
+    typeof p?.summary === "string" ? p.summary : typeof p?.about === "string" ? p.about : null;
+  return {
+    experience,
+    education,
+    skills,
+    about,
+    headline: typeof p?.headline === "string" ? p.headline : null,
+    location: typeof p?.location === "string" ? p.location : null,
+    followerCount: typeof p?.follower_count === "number" ? p.follower_count : null,
+    fetchedAt: new Date().toISOString(),
+  };
+}
 
-    const dated = parseLiDate(current?.start);
-    if (dated && dated.ageDays >= 0 && dated.ageDays <= windowDays && cand.profileUrl) {
-      await writeClaim({
-        contactId: cand.contactId,
-        field: "job_change",
-        value: `${cand.name} recently moved to ${newCompany}${cand.oldCompany ? ` from ${cand.oldCompany}` : ""}`,
-        sourceUrl: cand.profileUrl,
-        eventDate: dated.iso,
-        publishedDate: dated.iso,
-        confidence: 0.85,
-      });
-      flagged++;
+/**
+ * Deep profile pass (rate-limited ~150/day). For the priority set (top relevance /
+ * high-value) plus job-change candidates, fetch the full LinkedIn profile: store
+ * career + education + skills, refresh company/role from the authoritative current
+ * position, and date genuine recent moves into a job_change claim.
+ */
+async function deepProfilePass(
+  userId: string,
+  liId: string,
+  windowDays: number,
+  candidates: Candidate[],
+): Promise<void> {
+  const all = await db.select().from(contacts).where(eq(contacts.userId, userId));
+  const candidateMap = new Map(candidates.map((c) => [c.contactId, c]));
+  const targets = all
+    .filter(
+      (c) =>
+        !c.isOrganization &&
+        c.linkedinUrl &&
+        ((c.relevance ?? 0) >= 55 || c.highValue || candidateMap.has(c.id)),
+    )
+    .sort(
+      (a, b) =>
+        Number(Boolean(b.highValue)) - Number(Boolean(a.highValue)) ||
+        (b.relevance ?? 0) - (a.relevance ?? 0),
+    )
+    .slice(0, env.ENRICH_DAILY_LINKEDIN_CAP);
+
+  let fetched = 0;
+  let flagged = 0;
+  for (const c of targets) {
+    const slug = linkedinSlug(c.linkedinUrl) ?? "";
+    if (!slug) continue;
+    const profile = await getProfile(liId, slug, ["experience", "education", "about", "skills"]);
+    if (!profile) continue;
+    fetched++;
+    const normalized = normalizeProfile(profile);
+    const exp: any[] = (profile as any)?.work_experience ?? [];
+    const current = exp.find((e) => e?.current) ?? exp[0];
+    const newCompany = (typeof current?.company === "string" && current.company) || c.company;
+    const newRole = (typeof current?.position === "string" && current.position) || c.role;
+
+    const cand = candidateMap.get(c.id);
+    if (cand) {
+      const dated = parseLiDate(current?.start);
+      if (dated && dated.ageDays >= 0 && dated.ageDays <= windowDays && cand.profileUrl) {
+        await writeClaim({
+          contactId: c.id,
+          field: "job_change",
+          value: `${c.name} recently moved to ${newCompany}${cand.oldCompany ? ` from ${cand.oldCompany}` : ""}`,
+          sourceUrl: cand.profileUrl,
+          eventDate: dated.iso,
+          publishedDate: dated.iso,
+          confidence: 0.85,
+        });
+        flagged++;
+      }
     }
+    await db
+      .update(contacts)
+      .set({ company: newCompany, role: newRole, profileData: normalized })
+      .where(eq(contacts.id, c.id));
   }
-  console.log(`[enrichment] profile-dated ${used} candidate(s); ${flagged} recent move(s) flagged`);
+  console.log(`[enrichment] deep-profiled ${fetched} contact(s); ${flagged} recent move(s) flagged`);
 }
 
 async function syncLinkedInMessages(
@@ -404,6 +472,8 @@ export async function runEnrichment(): Promise<void> {
   }
 
   const windowByUser = new Map<string, number>();
+  const candidatesByUser = new Map<string, Candidate[]>();
+  const liByUser = new Map<string, string | null>();
 
   for (const [userId, list] of byUser) {
     const ctx = (
@@ -431,15 +501,11 @@ export async function runEnrichment(): Promise<void> {
       );
 
     const liId = await accountId(userId, "linkedin");
+    liByUser.set(userId, liId);
     const { providerToContact, candidates } = await matchLinkedIn(userId, list, liId);
+    candidatesByUser.set(userId, candidates);
 
-    if (liId) {
-      const byId = new Map(
-        (await db.select().from(contacts).where(eq(contacts.userId, userId))).map((c) => [c.id, c]),
-      );
-      await dateJobChanges(liId, candidates, windowDays, byId);
-      await syncLinkedInMessages(userId, liId, providerToContact);
-    }
+    if (liId) await syncLinkedInMessages(userId, liId, providerToContact);
 
     const emailId = await accountId(userId, "email");
     if (emailId) await syncEmail(userId, emailId);
@@ -457,17 +523,21 @@ export async function runEnrichment(): Promise<void> {
 
   await runRecompute();
 
-  // Phase C: Exa public milestones for the priority set, dated within the window.
-  if (isConfigured("exa")) {
-    const graded = await db.select().from(contacts);
-    const gByUser = new Map<string, Contact[]>();
-    for (const c of graded) {
-      const l = gByUser.get(c.userId) ?? [];
-      l.push(c);
-      gByUser.set(c.userId, l);
+  // Post-grade, priority-first: deep LinkedIn profiles, then Exa public milestones.
+  const graded = await db.select().from(contacts);
+  const gByUser = new Map<string, Contact[]>();
+  for (const c of graded) {
+    const l = gByUser.get(c.userId) ?? [];
+    l.push(c);
+    gByUser.set(c.userId, l);
+  }
+  for (const [userId, glist] of gByUser) {
+    const windowDays = windowByUser.get(userId) ?? env.NEWS_FRESHNESS_DAYS;
+    const liId = liByUser.get(userId);
+    if (liId && isConfigured("unipile")) {
+      await deepProfilePass(userId, liId, windowDays, candidatesByUser.get(userId) ?? []);
     }
-    for (const [userId, glist] of gByUser) {
-      const windowDays = windowByUser.get(userId) ?? env.NEWS_FRESHNESS_DAYS;
+    if (isConfigured("exa")) {
       const startDate = new Date(Date.now() - windowDays * 86_400_000).toISOString().slice(0, 10);
       const priority = glist
         .filter((c) => !c.isOrganization && ((c.relevance ?? 0) >= 55 || c.highValue))

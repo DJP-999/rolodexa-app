@@ -57,6 +57,21 @@ export default async function ContactProfile({ params }: { params: Promise<{ id:
   const initials = c.name.split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
   const news = cls.filter((x) => x.field === "news" || x.field === "job_change");
   const rp = (c.rpFeatures ?? {}) as Record<string, number>;
+  const prof = (c.profileData ?? null) as {
+    experience?: {
+      company?: string | null;
+      position?: string | null;
+      location?: string | null;
+      start?: string | null;
+      end?: string | null;
+      current?: boolean;
+    }[];
+    education?: { school?: string | null; degree?: string | null; field?: string | null; start?: string | null; end?: string | null }[];
+    skills?: string[];
+  } | null;
+  const hasEnrichment = Boolean(
+    prof && ((prof.experience?.length ?? 0) || (prof.education?.length ?? 0) || (prof.skills?.length ?? 0)),
+  );
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -155,6 +170,66 @@ export default async function ContactProfile({ params }: { params: Promise<{ id:
           </div>
         )}
       </div>
+
+      {/* Enrichment — career, education, skills from the deep LinkedIn profile */}
+      {hasEnrichment && (
+        <div className="mt-5 rounded-2xl border border-hairline bg-white p-5">
+          <h2 className="flex items-center gap-2 text-sm font-semibold">
+            <Briefcase className="h-4 w-4 text-muted" /> Enrichment
+          </h2>
+          {(prof?.experience?.length ?? 0) > 0 && (
+            <div className="mt-4">
+              <div className="text-[11px] font-medium uppercase tracking-wide text-muted">
+                Career &amp; experience
+              </div>
+              <ul className="mt-2 space-y-2">
+                {prof!.experience!.map((e, i) => (
+                  <li key={i} className="text-sm">
+                    <div className="font-medium text-ink">
+                      {e.position ?? "—"}
+                      {e.company ? <span className="text-muted"> · {e.company}</span> : null}
+                    </div>
+                    <div className="text-xs text-muted">
+                      {[e.start, e.end ?? (e.current ? "Present" : null)].filter(Boolean).join(" – ")}
+                      {e.location ? ` · ${e.location}` : ""}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {(prof?.education?.length ?? 0) > 0 && (
+            <div className="mt-4">
+              <div className="text-[11px] font-medium uppercase tracking-wide text-muted">Education</div>
+              <ul className="mt-2 space-y-2">
+                {prof!.education!.map((e, i) => (
+                  <li key={i} className="text-sm">
+                    <div className="font-medium text-ink">{e.school ?? "—"}</div>
+                    <div className="text-xs text-muted">
+                      {[e.degree, e.field].filter(Boolean).join(", ")}
+                      {e.start || e.end ? ` · ${[e.start, e.end].filter(Boolean).join(" – ")}` : ""}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {(prof?.skills?.length ?? 0) > 0 && (
+            <div className="mt-4">
+              <div className="text-[11px] font-medium uppercase tracking-wide text-muted">
+                Interests &amp; skills
+              </div>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {prof!.skills!.map((s, i) => (
+                  <span key={i} className="rounded-md bg-black/[0.04] px-2 py-0.5 text-xs text-ink">
+                    {s}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Recent activity */}
       <div className="mt-5 rounded-2xl border border-hairline bg-white p-5">

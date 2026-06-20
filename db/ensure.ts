@@ -17,5 +17,7 @@ export async function ensureSchema(sql: {
   );
   // Lazily-generated contact bio shown on the profile page.
   await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "summary" text`);
+  // Deep LinkedIn profile (career, education, skills) for priority contacts.
+  await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "profile_data" jsonb`);
   console.log("[db] ensureSchema applied.");
 }
