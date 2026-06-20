@@ -28,6 +28,7 @@ export async function saveContextAction(formData: FormData) {
     currentFocus: get("currentFocus"),
     activeProjects: get("activeProjects"),
     priorityConnections: get("priorityConnections"),
+    writingStyle: get("writingStyle"),
     timezone: get("timezone") ?? "America/New_York",
   };
 

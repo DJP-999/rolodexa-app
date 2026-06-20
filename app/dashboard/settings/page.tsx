@@ -115,6 +115,20 @@ export default async function SettingsPage() {
             />
           </label>
           <label className="block">
+            <span className="text-sm font-medium text-ink">Writing style</span>
+            <span className="block text-xs text-muted">
+              Auto-learned from your sent messages — Dexa drafts proactive notes in this voice. Edit
+              to taste; leave blank to re-learn on the next enrichment.
+            </span>
+            <textarea
+              name="writingStyle"
+              defaultValue={ctx?.writingStyle ?? ""}
+              rows={3}
+              placeholder="Learned automatically once your LinkedIn messages have synced."
+              className={inputCls}
+            />
+          </label>
+          <label className="block">
             <span className="text-sm font-medium text-ink">Timezone</span>
             <input
               name="timezone"

@@ -6,6 +6,7 @@ import { search } from "@/lib/integrations/exa";
 import { getAllRelations, getChats, getChatMessages, getEmails } from "@/lib/integrations/unipile";
 import { writeClaim } from "@/lib/provenance/claims";
 import { complete } from "@/lib/llm";
+import { deriveWritingStyle } from "@/lib/agent/style";
 import { runRecompute } from "./recompute";
 
 type Contact = typeof contacts.$inferSelect;
@@ -266,9 +267,64 @@ async function categorizeUser(userId: string): Promise<void> {
 }
 
 /**
- * Enrichment pass. Cheap/bulk first (LinkedIn match + message/email sync +
- * categorization), then re-grade, then the rationed paid step (Exa for priority).
- * Runs nightly and on demand; every integration degrades cleanly when unset.
+ * Validate Exa results: genuinely about THIS contact AND a noteworthy recent
+ * event — strict, to avoid namesake hallucinations. Returns dated, sourced items.
+ */
+async function extractNews(
+  c: Contact,
+  results: { title?: string; url: string; publishedDate?: string; text?: string; highlights?: string[] }[],
+): Promise<{ value: string; url: string; eventDate: string | null; published: string | null }[]> {
+  if (!results.length) return [];
+  const payload = results.map((r, i) => ({
+    i,
+    title: r.title ?? "",
+    url: r.url,
+    publishedDate: r.publishedDate ?? null,
+    snippet: (r.text ?? r.highlights?.[0] ?? "").slice(0, 300),
+  }));
+  const raw = await complete({
+    tier: "cheap",
+    system:
+      "You validate web search results about a specific professional contact for a relationship CRM. " +
+      "For each result decide: is it genuinely about THIS person (same individual — not a namesake at a different company or field), " +
+      "and does it report a NOTEWORTHY, RECENT professional event (funding, new role or promotion, company launch, award, acquisition, board seat, major milestone)? " +
+      "Extract the event date if stated. Be strict: when unsure whether it's the same person, mark about_this_person false. Return JSON only.",
+    messages: [
+      {
+        role: "user",
+        content:
+          `Person: ${c.name}; Company: ${c.company ?? "unknown"}; Role: ${c.role ?? "unknown"}.\n` +
+          `Results: ${JSON.stringify(payload)}\n` +
+          `Return a JSON array [{"i":number,"about_this_person":boolean,"noteworthy":boolean,"event_date":"YYYY-MM-DD"|null,"summary":"one factual sentence"}].`,
+      },
+    ],
+    maxTokens: 800,
+    temperature: 0,
+  });
+  try {
+    const arr = JSON.parse(raw.match(/\[[\s\S]*\]/)?.[0] ?? "[]");
+    const out: { value: string; url: string; eventDate: string | null; published: string | null }[] = [];
+    for (const x of arr) {
+      if (x?.about_this_person && x?.noteworthy && typeof x.i === "number" && results[x.i]) {
+        const r = results[x.i];
+        out.push({
+          value: String(x.summary || r.title || r.url),
+          url: r.url,
+          eventDate: typeof x.event_date === "string" ? x.event_date : null,
+          published: r.publishedDate?.slice(0, 10) ?? null,
+        });
+      }
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Enrichment pass. Cheap/bulk first (LinkedIn match + message/email sync + style
+ * learning + categorization), then re-grade, then the rationed paid step (Exa news
+ * for priority, validated). Runs nightly and on demand; degrades cleanly when unset.
  */
 export async function runEnrichment(): Promise<void> {
   const all = await db.select().from(contacts);
@@ -289,6 +345,7 @@ export async function runEnrichment(): Promise<void> {
     const emailId = await accountId(userId, "email");
     if (emailId) await syncEmail(userId, emailId);
 
+    await deriveWritingStyle(userId);
     await categorizeUser(userId);
   }
 
@@ -311,15 +368,16 @@ export async function runEnrichment(): Promise<void> {
         startPublishedDate: startDate,
         numResults: 4,
       });
-      for (const r of results) {
+      const validated = await extractNews(c, results);
+      for (const v of validated) {
         await writeClaim({
           contactId: c.id,
           field: "news",
-          value: r.title ?? r.highlights?.[0] ?? r.url,
-          sourceUrl: r.url,
-          publishedDate: r.publishedDate?.slice(0, 10) ?? null,
-          eventDate: null,
-          confidence: 0.5,
+          value: v.value,
+          sourceUrl: v.url,
+          eventDate: v.eventDate ?? v.published ?? null,
+          publishedDate: v.published,
+          confidence: 0.7,
         });
       }
     }

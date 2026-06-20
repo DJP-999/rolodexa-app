@@ -9,5 +9,7 @@ export async function ensureSchema(sql: {
   // LinkedIn message interactions need a 'linkedin' value on the channel enum.
   // ADD VALUE IF NOT EXISTS runs as its own (auto-committed) statement.
   await sql.unsafe(`ALTER TYPE "channel" ADD VALUE IF NOT EXISTS 'linkedin'`);
+  // Learned outreach voice, used to draft proactive messages in the user's style.
+  await sql.unsafe(`ALTER TABLE "user_context" ADD COLUMN IF NOT EXISTS "writing_style" text`);
   console.log("[db] ensureSchema applied.");
 }

@@ -18,7 +18,7 @@ export const userContext = pgTable("user_context", {
   userId: uuid("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
   role: text("role"), currentFocus: text("current_focus"), priorityConnections: text("priority_connections"),
   activeProjects: text("active_projects"), painPoints: jsonb("pain_points").$type<string[]>().default([]),
-  timezone: text("timezone").default("America/New_York"),
+  timezone: text("timezone").default("America/New_York"), writingStyle: text("writing_style"),
   weights: jsonb("weights").$type<{professional:number;recency:number;relationship:number;geographic:number;trigger:number;replyPropensity:number}>().default({professional:30,recency:25,relationship:20,geographic:15,trigger:10,replyPropensity:0}),
   observationUntil: date("observation_until"),
   maxNudgesPerDay: integer("max_nudges_per_day").default(3),
@@ -114,3 +114,6 @@ export const jobRuns = pgTable("job_runs", {
   finishedAt: timestamp("finished_at", { withTimezone: true }), status: text("status").default("running"),
   detail: jsonb("detail").$type<Record<string, unknown>>().default({}),
 });
+
+export type Contact = typeof contacts.$inferSelect;
+export type Claim = typeof claims.$inferSelect;
