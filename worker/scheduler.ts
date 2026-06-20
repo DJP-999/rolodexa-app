@@ -8,10 +8,10 @@ import { runSuggestions } from "./jobs/suggestions";
 import { runBrief } from "./jobs/brief";
 
 /**
- * The scheduler. Runs in-process with the web server (via instrumentation.ts)
- * so there's a single Railway service with one correct set of variables —
- * no fragile second-service overrides. Overnight-heavy / daytime-light cadence,
- * timezone ET. Error-safe: a Redis hiccup never takes down the web server.
+ * The scheduler. Runs in-process with the web server (via instrumentation.ts) so
+ * there's a single Railway service with one correct set of variables. Overnight-
+ * heavy / daytime-light cadence, timezone ET. Error-safe: a Redis hiccup never
+ * takes down the web server.
  */
 const TZ = "America/New_York";
 const QUEUE = "rolodexa";
@@ -30,21 +30,37 @@ export const JOBS: JobDef[] = [
 
 export const byName = new Map(JOBS.map((j) => [j.name, j.run]));
 
+let connection: IORedis | null = null;
+let queue: Queue | null = null;
+
+function getConnection(): IORedis | null {
+  if (!env.REDIS_URL) return null;
+  if (!connection) connection = new IORedis(env.REDIS_URL, { maxRetriesPerRequest: null });
+  return connection;
+}
+
+function getQueue(): Queue | null {
+  const c = getConnection();
+  if (!c) return null;
+  if (!queue) queue = new Queue(QUEUE, { connection: c });
+  return queue;
+}
+
 let started = false;
 
 export async function startScheduler(): Promise<void> {
   if (started) return;
   started = true;
   try {
-    if (!env.REDIS_URL) {
+    const c = getConnection();
+    if (!c) {
       console.warn("[scheduler] REDIS_URL not set — scheduler idle.");
       return;
     }
-    const connection = new IORedis(env.REDIS_URL, { maxRetriesPerRequest: null });
-    const queue = new Queue(QUEUE, { connection });
+    const q = getQueue()!;
 
     for (const j of JOBS) {
-      await queue.add(
+      await q.add(
         j.name,
         {},
         { repeat: { pattern: j.cron, tz: TZ }, jobId: j.name, removeOnComplete: true, removeOnFail: 50 },
@@ -59,7 +75,7 @@ export async function startScheduler(): Promise<void> {
         console.log(`[scheduler] running ${job.name}`);
         await run();
       },
-      { connection },
+      { connection: c },
     );
     worker.on("failed", (job, err) => console.error(`[scheduler] ${job?.name} failed:`, err));
     worker.on("completed", (job) => console.log(`[scheduler] ${job.name} ✓`));
@@ -67,6 +83,21 @@ export async function startScheduler(): Promise<void> {
     console.log(`[scheduler] online — ${JOBS.length} schedules registered (tz ${TZ}).`);
   } catch (e) {
     console.error("[scheduler] failed to start (web server unaffected):", e);
+  }
+}
+
+/** Fire-and-forget a one-off job run via the queue; falls back to inline if Redis is absent. */
+export async function enqueue(name: string): Promise<void> {
+  const q = getQueue();
+  if (!q) {
+    await runOnce(name);
+    return;
+  }
+  try {
+    await q.add(name, {}, { removeOnComplete: true, removeOnFail: 20 });
+  } catch (e) {
+    console.error("[scheduler] enqueue failed, running inline:", e);
+    await runOnce(name);
   }
 }
 

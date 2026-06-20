@@ -6,6 +6,7 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
 import postgres from "postgres";
+import { ensureSchema } from "./ensure";
 
 async function main() {
   const url = process.env.DATABASE_URL;
@@ -18,6 +19,8 @@ async function main() {
 
   const dbm = drizzle(migrationClient);
   await migrate(dbm, { migrationsFolder: "./db/migrations" });
+
+  await ensureSchema(migrationClient);
 
   await migrationClient.end();
   console.log("[db] migrations applied.");

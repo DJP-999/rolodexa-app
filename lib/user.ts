@@ -1,6 +1,6 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { users, userContext } from "@/db/schema";
+import { users, userContext, connectedAccounts } from "@/db/schema";
 import { env } from "@/lib/env";
 
 /**
@@ -21,5 +21,17 @@ export async function getPrimaryUser() {
 export async function getUserContextRow(userId: string) {
   return (
     (await db.select().from(userContext).where(eq(userContext.userId, userId)).limit(1))[0] ?? null
+  );
+}
+
+export async function getConnectedAccount(userId: string, provider: string) {
+  return (
+    (
+      await db
+        .select()
+        .from(connectedAccounts)
+        .where(and(eq(connectedAccounts.userId, userId), eq(connectedAccounts.provider, provider)))
+        .limit(1)
+    )[0] ?? null
   );
 }

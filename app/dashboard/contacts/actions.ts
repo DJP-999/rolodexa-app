@@ -5,11 +5,23 @@ import { eq } from "drizzle-orm";
 import Papa from "papaparse";
 import { db } from "@/db";
 import { contacts } from "@/db/schema";
+import { isConfigured } from "@/lib/env";
+import { extractJSON } from "@/lib/llm";
 import { getPrimaryUser } from "@/lib/user";
-import { runOnce } from "@/worker/scheduler";
+import { enqueue, runOnce } from "@/worker/scheduler";
 
 type Rel = "family" | "friend" | "coworker" | "investor" | "vendor" | "other";
 type NewContact = typeof contacts.$inferInsert;
+type FieldKey =
+  | "name"
+  | "firstName"
+  | "lastName"
+  | "email"
+  | "company"
+  | "role"
+  | "location"
+  | "linkedinUrl"
+  | "phone";
 
 const norm = (s: string) => s.trim().toLowerCase();
 
@@ -20,6 +32,31 @@ function colIndex(headers: string[], candidates: string[]): number {
   return headers.findIndex((h) => candidates.some((c) => h.includes(c)));
 }
 
+/**
+ * Model-reasoned column mapping. One cheap call reads the headers + a few sample
+ * rows and maps arbitrary/messy CRM columns onto our schema — so cost is per FILE,
+ * not per row. Falls back silently to heuristics when no LLM is configured.
+ */
+async function mapColumnsLLM(headers: string[], samples: string[][]): Promise<Partial<Record<FieldKey, number>>> {
+  if (!headers.length || (!isConfigured("openrouter") && !isConfigured("llm"))) return {};
+  const res = await extractJSON<Record<string, number | null>>({
+    tier: "cheap",
+    system: "You map arbitrary contact/CRM CSV columns onto a fixed schema. Return JSON only.",
+    instruction:
+      `Header columns (0-based index, name): ${JSON.stringify(headers.map((h, i) => [i, h]))}\n` +
+      `Sample data rows: ${JSON.stringify(samples)}\n` +
+      `Return JSON mapping each field to the best 0-based column index, or null if absent:\n` +
+      `{"name":?,"firstName":?,"lastName":?,"email":?,"company":?,"role":?,"location":?,"linkedinUrl":?,"phone":?}\n` +
+      `Pick the column whose values genuinely look like each field (emails contain @, LinkedIn URLs contain linkedin.com, etc.).`,
+    fallback: {},
+  });
+  const out: Partial<Record<FieldKey, number>> = {};
+  for (const [k, v] of Object.entries(res || {})) {
+    if (typeof v === "number" && v >= 0 && v < headers.length) out[k as FieldKey] = v;
+  }
+  return out;
+}
+
 function guessRelationship(company: string, role: string): Rel {
   const s = `${company} ${role}`.toLowerCase();
   if (/capital|ventures?|partners|fund|equity|family office|investor|asset manage|wealth/.test(s))
@@ -28,10 +65,9 @@ function guessRelationship(company: string, role: string): Rel {
 }
 
 /**
- * CSV import. Handles LinkedIn ("Connections.csv" with a notes preamble),
- * Google Contacts, and generic exports by sniffing the header row and mapping
- * common column names. Dedupes by email (or name) against the existing network
- * and within the file, then re-grades.
+ * CSV import. Parses the file, lets the model map messy columns, dedupes against
+ * the existing network, inserts fast, then kicks off background enrichment +
+ * grading (LinkedIn match, categorization, milestones) rather than blocking.
  */
 export async function importCsvAction(formData: FormData) {
   const file = formData.get("file") as File | null;
@@ -51,14 +87,19 @@ export async function importCsvAction(formData: FormData) {
   const headers = grid[headerIdx].map(norm);
   const body = grid.slice(headerIdx + 1);
 
-  const iFirst = colIndex(headers, ["first name", "given name"]);
-  const iLast = colIndex(headers, ["last name", "family name", "surname"]);
-  const iName = headers.findIndex((h) => h === "name" || h === "full name" || h === "display name");
-  const iEmail = colIndex(headers, ["email address", "e-mail 1 - value", "email", "e-mail"]);
-  const iCompany = colIndex(headers, ["company", "organization 1 - name", "organization", "employer"]);
-  const iRole = colIndex(headers, ["position", "organization 1 - title", "title", "role", "job title"]);
-  const iLoc = colIndex(headers, ["location", "address 1 - city", "city"]);
-  const iUrl = colIndex(headers, ["url", "linkedin", "profile url"]);
+  const mapped = await mapColumnsLLM(headers, body.slice(0, 3));
+
+  const iFirst = mapped.firstName ?? colIndex(headers, ["first name", "given name"]);
+  const iLast = mapped.lastName ?? colIndex(headers, ["last name", "family name", "surname"]);
+  const iName =
+    mapped.name ?? headers.findIndex((h) => h === "name" || h === "full name" || h === "display name");
+  const iEmail = mapped.email ?? colIndex(headers, ["email address", "e-mail 1 - value", "email", "e-mail"]);
+  const iCompany =
+    mapped.company ?? colIndex(headers, ["company", "organization 1 - name", "organization", "employer"]);
+  const iRole =
+    mapped.role ?? colIndex(headers, ["position", "organization 1 - title", "title", "role", "job title"]);
+  const iLoc = mapped.location ?? colIndex(headers, ["location", "address 1 - city", "city"]);
+  const iUrl = mapped.linkedinUrl ?? colIndex(headers, ["url", "linkedin", "profile url"]);
 
   const at = (row: string[], i: number) => (i >= 0 && row[i] ? row[i].trim() : "");
 
@@ -107,7 +148,7 @@ export async function importCsvAction(formData: FormData) {
   for (let i = 0; i < toInsert.length; i += 500) {
     await db.insert(contacts).values(toInsert.slice(i, i + 500));
   }
-  if (toInsert.length) await runOnce("recompute");
+  if (toInsert.length) await enqueue("enrichment");
 
   redirect(`/dashboard/contacts?imported=${toInsert.length}`);
 }

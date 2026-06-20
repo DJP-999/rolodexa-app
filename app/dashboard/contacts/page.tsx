@@ -91,7 +91,7 @@ export default async function ContactsPage({
                 : sp.error
         }`
       : sp.imported != null
-        ? `Imported ${sp.imported} new contact${sp.imported === "1" ? "" : "s"} and re-graded your network.`
+        ? `Imported ${sp.imported} new contact${sp.imported === "1" ? "" : "s"}. Enrichment + grading are running in the background — refresh in a bit.`
         : sp.added
           ? "Contact added and your network re-graded."
           : null;

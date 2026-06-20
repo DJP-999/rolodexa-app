@@ -24,6 +24,12 @@ const schema = z.object({
 
   EXA_API_KEY: z.string().optional(),
 
+  UNIPILE_DSN: z.string().optional(),
+  UNIPILE_API_KEY: z.string().optional(),
+
+  OPENROUTER_API_KEY: z.string().optional(),
+  OPENROUTER_MODEL_CHEAP: z.string().default("openai/gpt-4o-mini"),
+
   AUTH_SECRET: z.string().optional(),
   AUTH_DEV_USER_EMAIL: z.string().default("dev@rolodexa.local"),
 
@@ -33,11 +39,13 @@ const schema = z.object({
     .transform((v) => v !== "false"),
   ENRICH_STALE_AFTER_DAYS: z.coerce.number().default(30),
   NEWS_FRESHNESS_DAYS: z.coerce.number().default(14),
+  ENRICH_DAILY_LINKEDIN_CAP: z.coerce.number().default(120),
+  ENRICH_MONTHLY_BUDGET_USD: z.coerce.number().default(40),
 });
 
 export const env = schema.parse(process.env);
 
-export type Integration = "nylas" | "telegram" | "exa" | "llm";
+export type Integration = "nylas" | "telegram" | "exa" | "llm" | "unipile" | "openrouter";
 
 export function isConfigured(which: Integration): boolean {
   switch (which) {
@@ -49,5 +57,9 @@ export function isConfigured(which: Integration): boolean {
       return Boolean(env.EXA_API_KEY);
     case "llm":
       return Boolean(env.ANTHROPIC_API_KEY);
+    case "unipile":
+      return Boolean(env.UNIPILE_DSN && env.UNIPILE_API_KEY);
+    case "openrouter":
+      return Boolean(env.OPENROUTER_API_KEY);
   }
 }

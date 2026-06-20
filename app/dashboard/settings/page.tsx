@@ -1,6 +1,6 @@
 import { isConfigured } from "@/lib/env";
-import { getPrimaryUser, getUserContextRow } from "@/lib/user";
-import { saveContextAction } from "./actions";
+import { getPrimaryUser, getUserContextRow, getConnectedAccount } from "@/lib/user";
+import { saveContextAction, linkLinkedInAction, enrichNowAction } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -28,13 +28,17 @@ function Status({ on }: { on: boolean }) {
   );
 }
 
-async function getContext() {
+async function getData() {
   try {
     const user = await getPrimaryUser();
-    if (!user) return null;
-    return await getUserContextRow(user.id);
+    if (!user) return { ctx: null, linkedin: null };
+    const [ctx, linkedin] = await Promise.all([
+      getUserContextRow(user.id),
+      getConnectedAccount(user.id, "linkedin"),
+    ]);
+    return { ctx, linkedin };
   } catch {
-    return null;
+    return { ctx: null, linkedin: null };
   }
 }
 
@@ -42,20 +46,22 @@ const inputCls =
   "mt-1.5 w-full rounded-lg border border-hairline bg-white px-3 py-2 text-sm outline-none focus:border-black/30";
 
 export default async function SettingsPage() {
-  const ctx = await getContext();
+  const { ctx, linkedin } = await getData();
+  const liName = (linkedin?.metadata as { name?: string } | null)?.name ?? null;
+  const unipileOn = isConfigured("unipile");
 
   return (
     <div className="mx-auto max-w-3xl space-y-8">
       <div>
         <h1 className="text-3xl font-bold">Settings</h1>
-        <p className="text-sm text-muted">Your context, scoring weights, connections, and jobs.</p>
+        <p className="text-sm text-muted">Your context, enrichment, scoring weights, and jobs.</p>
       </div>
 
       <section className="card">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Your context</h2>
         <p className="mt-1 text-xs text-muted">
-          This is the single biggest driver of who Rolodexa surfaces. Tell it what you&apos;re
-          working on and who matters — it re-grades your whole network on save.
+          The single biggest driver of who Rolodexa surfaces. Tell it what you&apos;re working on and
+          who matters — it re-grades your whole network on save.
         </p>
         <form action={saveContextAction} className="mt-4 space-y-4">
           <label className="block">
@@ -124,10 +130,57 @@ export default async function SettingsPage() {
       </section>
 
       <section className="card">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">
+          LinkedIn &amp; enrichment
+        </h2>
+        <p className="mt-1 text-xs text-muted">
+          Match your rolodex to your LinkedIn network, detect job changes, and pull public
+          milestones. Profile lookups are rate-limited (~150/day), so enrichment is priority-first.
+        </p>
+
+        <div className="mt-4 flex items-center justify-between text-sm">
+          <span>
+            LinkedIn account{" "}
+            {linkedin ? (
+              <span className="text-good">— linked{liName ? ` (${liName})` : ""}</span>
+            ) : (
+              <span className="text-muted">— not linked</span>
+            )}
+          </span>
+          <form action={linkLinkedInAction}>
+            <button
+              disabled={!unipileOn}
+              className="rounded-lg border border-hairline px-3 py-1.5 text-sm hover:bg-black/[0.03] disabled:opacity-40"
+            >
+              {linkedin ? "Re-link" : "Link LinkedIn"}
+            </button>
+          </form>
+        </div>
+
+        <div className="mt-3 flex items-center justify-between text-sm">
+          <span>Run enrichment now (background, priority-first)</span>
+          <form action={enrichNowAction}>
+            <button className="rounded-lg bg-black px-3 py-1.5 text-sm font-medium text-white hover:bg-black/90">
+              Enrich now
+            </button>
+          </form>
+        </div>
+
+        {!unipileOn && (
+          <p className="mt-3 text-xs text-amber-600">
+            Set UNIPILE_DSN and UNIPILE_API_KEY in Railway to enable LinkedIn linking.
+          </p>
+        )}
+      </section>
+
+      <section className="card">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Integrations</h2>
         <ul className="mt-3 space-y-2 text-sm">
           <li className="flex justify-between">
             Nylas (email + calendar) <Status on={isConfigured("nylas")} />
+          </li>
+          <li className="flex justify-between">
+            Unipile (LinkedIn) <Status on={isConfigured("unipile")} />
           </li>
           <li className="flex justify-between">
             Telegram <Status on={isConfigured("telegram")} />
@@ -137,6 +190,9 @@ export default async function SettingsPage() {
           </li>
           <li className="flex justify-between">
             Anthropic (LLM) <Status on={isConfigured("llm")} />
+          </li>
+          <li className="flex justify-between">
+            OpenRouter (cheap routing) <Status on={isConfigured("openrouter")} />
           </li>
         </ul>
       </section>
