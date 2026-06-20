@@ -5,6 +5,7 @@ import { userContext } from "@/db/schema";
 import { getPrimaryUser } from "@/lib/user";
 import { buildAgentContext } from "@/lib/agent/context";
 import { complete, type ChatMessage } from "@/lib/llm";
+import { TONE_GUIDE, stripEmDashes } from "@/lib/agent/tone";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -28,8 +29,9 @@ export async function POST(req: Request) {
     const system =
       `You are Dexa, the relationship and deal-flow co-pilot for ${ctx?.role ?? "a dealmaker"}. ` +
       `You help them stay close to their network at scale: who to reach out to, why now, and what to say. ` +
-      `Use ONLY the CONTEXT below for facts about specific people — if someone isn't in it, say you don't see them in the loaded set rather than inventing details. ` +
-      `Be concise, specific, and direct. When asked to draft outreach, write it ready-to-send, warm, and reference something concrete about the recipient — never lead with an ask. ` +
+      `Use ONLY the CONTEXT below for facts about specific people. If someone is not in it, say you do not see them in the loaded set rather than inventing details. ` +
+      `Be concise, specific, and direct. Never use em-dashes or en-dashes anywhere in your replies; use periods or commas. ` +
+      `When you draft outreach, use this voice: ${TONE_GUIDE} ` +
       `Current focus: ${ctx?.currentFocus ?? "n/a"}.\n\n=== CONTEXT ===\n${context}`;
 
     const reply = await complete({
@@ -39,7 +41,7 @@ export async function POST(req: Request) {
       maxTokens: 900,
     });
 
-    return NextResponse.json({ reply });
+    return NextResponse.json({ reply: stripEmDashes(reply) });
   } catch (e) {
     console.error("[chat]", e);
     return NextResponse.json({ reply: "Something went wrong handling that." }, { status: 200 });

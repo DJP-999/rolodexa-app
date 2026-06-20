@@ -4,6 +4,7 @@ import { claims, contacts, suggestions, userContext } from "@/db/schema";
 import { cadenceForRelevance } from "@/lib/scoring/relevance";
 import { isNews } from "@/lib/provenance/claims";
 import { complete } from "@/lib/llm";
+import { TONE_GUIDE, stripEmDashes } from "@/lib/agent/tone";
 
 const TRIGGER_WEIGHT = { re_engage: 0.6, job_change: 0.9, milestone: 0.8 } as const;
 
@@ -23,36 +24,39 @@ async function draft(opts: {
   const msg = await complete({
     tier: "strong",
     system:
-      "You write outreach AS THE USER (first person), to send from their own account to a contact. " +
-      "Match the user's writing style if provided. Keep it SHORT — 2 to 4 sentences. Warm, human, specific. " +
-      "Use the recipient's real first name; never lead with an ask. " +
-      "CRITICAL: never output placeholders, square brackets, or notes to the user (e.g. [recent news], [detail needed], 'Note: ...'). " +
-      "If a concrete detail is provided, reference it naturally. If NOT, write a genuine relationship-based check-in (it's been a while, they came to mind, hope things are going well) WITHOUT referencing any specific event you don't actually know. " +
-      "Never invent facts. Output ONLY the final message text, ready to send." +
-      (opts.style ? `\n\nUSER WRITING STYLE:\n${opts.style}` : ""),
+      "You write outreach AS THE USER (first person), to send from their own account to a peer. " +
+      TONE_GUIDE +
+      " Use the recipient's real first name. Open with the concrete reason, never with an ask. " +
+      "If a concrete detail is provided, reference it. If not, write a sincere check-in without inventing any specifics. " +
+      "Never invent facts. Output ONLY the final message text." +
+      (opts.style ? `\n\nWhere it fits, echo how the user actually writes:\n${opts.style}` : ""),
     messages: [
       {
         role: "user",
         content:
-          `Recipient: ${opts.name}\nWhy I'm reaching out: ${opts.reason}` +
+          `Recipient: ${opts.name}\nWhy I am reaching out: ${opts.reason}` +
           (opts.fact
             ? `\nConcrete detail to reference: ${opts.fact}`
-            : "\n(No specific detail available — write a sincere check-in; do NOT invent or reference any specific event.)") +
-          (opts.focus ? `\nMy current focus (mention only if it fits naturally): ${opts.focus}` : ""),
+            : "\n(No specific detail. Write a sincere check-in. Do not invent or reference any specific event.)") +
+          (opts.focus ? `\nMy current focus (only if it fits naturally): ${opts.focus}` : ""),
       },
     ],
     maxTokens: 220,
     temperature: 0.5,
   });
 
-  if (msg && msg.length > 0 && !msg.startsWith("[llm-stub") && !hasLeak(msg)) return msg;
+  if (msg && msg.length > 0 && !msg.startsWith("[llm-stub") && !hasLeak(msg)) return stripEmDashes(msg);
 
   // Deterministic, placeholder-free fallback so nothing half-written ever ships.
   const first = opts.name.split(/\s+/)[0] || "there";
   if (opts.fact) {
-    return `Congrats on the move, ${first} — saw the news and wanted to reach out. Would love to hear how the new chapter is going once you're settled. Open to a quick call sometime?`;
+    return stripEmDashes(
+      `Congrats on the new seat, ${first}. Saw the move and wanted to reach out directly. Would be good to compare notes once you are settled. Free for a quick call this week?`,
+    );
   }
-  return `Hi ${first} — it's been a while and you came to mind. I wanted to check in and see how things are going on your end; no agenda, just overdue for a proper catch-up. Would you be open to a quick call sometime?`;
+  return stripEmDashes(
+    `${first}, it has been too long. No agenda, I just want to catch up and hear what you are focused on right now. Free for a quick call this week?`,
+  );
 }
 
 async function alreadyPending(userId: string, contactId: string, trigger: string): Promise<boolean> {

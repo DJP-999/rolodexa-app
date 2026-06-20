@@ -103,5 +103,15 @@ export async function getContactProfile(id: string) {
     if (bio) await db.update(contacts).set({ summary: bio }).where(eq(contacts.id, id));
   }
 
-  return { contact: c, interactions: ix, claims: cls, suggestions: sug, stats, bio: bio || null };
+  let related: { id: string; name: string; role: string | null }[] = [];
+  if (c.company) {
+    const sameCo = await db
+      .select({ id: contacts.id, name: contacts.name, role: contacts.role })
+      .from(contacts)
+      .where(and(eq(contacts.userId, c.userId), eq(contacts.company, c.company)))
+      .limit(12);
+    related = sameCo.filter((r) => r.id !== c.id).slice(0, 8);
+  }
+
+  return { contact: c, interactions: ix, claims: cls, suggestions: sug, stats, bio: bio || null, related };
 }

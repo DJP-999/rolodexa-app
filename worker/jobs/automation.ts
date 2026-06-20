@@ -4,6 +4,7 @@ import { automations, connectedAccounts } from "@/db/schema";
 import { buildAgentContext } from "@/lib/agent/context";
 import { complete } from "@/lib/llm";
 import { sendMessage } from "@/lib/integrations/telegram";
+import { stripEmDashes } from "@/lib/agent/tone";
 
 /**
  * Run one user-defined automation: feed its prompt to the agent with real network
@@ -19,7 +20,8 @@ export async function runAutomation(id: string): Promise<void> {
     tier: "strong",
     system:
       "You are Dexa, a relationship & deal-flow co-pilot running a scheduled automation for the user. " +
-      "Use ONLY the CONTEXT for facts about specific people; never invent. Be concise, specific, and actionable. " +
+      "Use ONLY the CONTEXT for facts about specific people; never invent. Be concise, specific, and actionable, with no filler. " +
+      "Never use em-dashes or en-dashes; use periods or commas. " +
       "If nothing is worth sending right now, reply with exactly NO_MESSAGE.\n\n=== CONTEXT ===\n" +
       context,
     messages: [{ role: "user", content: a.prompt }],
@@ -36,7 +38,7 @@ export async function runAutomation(id: string): Promise<void> {
         .limit(1)
     )[0];
     if (tg?.externalId) {
-      await sendMessage(tg.externalId, `*${a.name}*\n---\n${reply}`);
+      await sendMessage(tg.externalId, `*${a.name}*\n---\n${stripEmDashes(reply)}`);
       status = "delivered:telegram";
     } else {
       status = "no-telegram";

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Mail, MapPin, ExternalLink, Briefcase, Newspaper, Activity } from "lucide-react";
+import { ArrowLeft, Mail, MapPin, ExternalLink, Briefcase, Newspaper, Activity, Users } from "lucide-react";
 import { getContactProfile } from "@/lib/contactProfile";
 
 export const dynamic = "force-dynamic";
@@ -52,7 +52,7 @@ export default async function ContactProfile({ params }: { params: Promise<{ id:
   const { id } = await params;
   const p = await getContactProfile(id).catch(() => null);
   if (!p) notFound();
-  const { contact: c, interactions: ix, claims: cls, suggestions: sug, stats, bio } = p;
+  const { contact: c, interactions: ix, claims: cls, suggestions: sug, stats, bio, related } = p;
 
   const initials = c.name.split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
   const news = cls.filter((x) => x.field === "news" || x.field === "job_change");
@@ -231,6 +231,28 @@ export default async function ContactProfile({ params }: { params: Promise<{ id:
         </div>
       )}
 
+      {/* Relationships — others in your network at the same firm */}
+      {related.length > 0 && (
+        <div className="mt-5 rounded-2xl border border-hairline bg-white p-5">
+          <h2 className="flex items-center gap-2 text-sm font-semibold">
+            <Users className="h-4 w-4 text-muted" /> Relationships
+          </h2>
+          <p className="mt-1 text-xs text-muted">Others in your network at {c.company}.</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {related.map((r) => (
+              <Link
+                key={r.id}
+                href={`/dashboard/contacts/${r.id}`}
+                className="rounded-lg border border-hairline px-3 py-1.5 text-sm hover:bg-black/[0.03]"
+              >
+                {r.name}
+                {r.role ? <span className="text-muted"> · {r.role}</span> : null}
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Recent activity */}
       <div className="mt-5 rounded-2xl border border-hairline bg-white p-5">
         <h2 className="flex items-center gap-2 text-sm font-semibold">
@@ -312,7 +334,16 @@ export default async function ContactProfile({ params }: { params: Promise<{ id:
           <span>
             LinkedIn {stats.msgOut} sent / {stats.msgIn} received
           </span>
+          <span>Meetings {stats.meetings}</span>
           {typeof rp.replyRate === "number" && <span>Reply rate {Math.round(rp.replyRate * 100)}%</span>}
+          {typeof rp.initiationRatio === "number" && (
+            <span>You initiate {Math.round(rp.initiationRatio * 100)}%</span>
+          )}
+          {c.replyPropensity != null && (
+            <span>Reply propensity {Math.round(c.replyPropensity * 100)}%</span>
+          )}
+          {c.importPriority != null && <span>Import priority {c.importPriority.toFixed(2)}</span>}
+          {c.status && <span className="capitalize">Status {c.status.replace(/_/g, " ")}</span>}
           {c.highValue && <span className="text-amber-600">Flagged high-value</span>}
           {c.gradedAt && <span>Graded {fmtDate(c.gradedAt)}</span>}
         </div>
