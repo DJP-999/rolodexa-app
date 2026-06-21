@@ -107,6 +107,18 @@ export async function dismissAction(formData: FormData) {
   revalidatePath("/dashboard/suggestions");
 }
 
+/** Save a hand-edited draft message. Keeps the user's exact wording (no transforms). */
+export async function saveDraftAction(formData: FormData) {
+  const id = String(formData.get("id"));
+  const message = String(formData.get("message") ?? "").trim();
+  if (!id) return;
+  await db
+    .update(suggestions)
+    .set({ draftMessage: message, updatedAt: new Date() })
+    .where(eq(suggestions.id, id));
+  revalidatePath("/dashboard/suggestions");
+}
+
 /** Generate → run the suggestions job on demand. */
 export async function generateAction() {
   await runOnce("suggestions");

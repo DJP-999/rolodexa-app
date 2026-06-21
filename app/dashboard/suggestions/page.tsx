@@ -1,9 +1,10 @@
 import { desc, eq, inArray } from "drizzle-orm";
 import Link from "next/link";
-import { Sparkles, Check, Clock, X, Pencil, Calendar, ExternalLink } from "lucide-react";
+import { Sparkles, Check, Clock, X, Calendar, ExternalLink } from "lucide-react";
 import { db } from "@/db";
 import { suggestions, contacts, claims, type Claim } from "@/db/schema";
 import { approveAction, snoozeAction, dismissAction, generateAction } from "./actions";
+import DraftEditor from "./DraftEditor";
 
 export const dynamic = "force-dynamic";
 
@@ -215,17 +216,7 @@ export default async function SuggestionsPage({
                 })()}
 
                 {s.draftMessage && (
-                  <div className="mt-3 rounded-xl bg-black/[0.03] p-4">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-medium uppercase tracking-wide text-muted">
-                        Draft message
-                      </span>
-                      <span className="flex items-center gap-1 text-xs text-muted">
-                        <Pencil className="h-3 w-3" /> Edit
-                      </span>
-                    </div>
-                    <p className="mt-2 text-sm italic text-muted">{s.draftMessage}</p>
-                  </div>
+                  <DraftEditor id={s.id} initial={s.draftMessage} editable={status === "pending"} />
                 )}
 
                 {status === "pending" ? (
