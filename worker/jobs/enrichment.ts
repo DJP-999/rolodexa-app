@@ -505,14 +505,26 @@ async function discoverXHandle(c: Contact, canSearch: boolean): Promise<string |
   return null;
 }
 
+/**
+ * Who the news sweep covers: EVERY VIP (high-value) contact, regardless of ranking,
+ * plus the top-N others by relevance. VIPs are must-watch, so they're never cut by the cap.
+ */
+function selectPriority(glist: Contact[], limit: number): Contact[] {
+  const eligible = glist.filter(
+    (c) => !c.isOrganization && ((c.relevance ?? 0) >= 55 || c.highValue),
+  );
+  const sorted = eligible.sort((a, b) => (b.relevance ?? 0) - (a.relevance ?? 0));
+  const vips = sorted.filter((c) => c.highValue);
+  const rest = sorted.filter((c) => !c.highValue).slice(0, limit);
+  const seen = new Set<string>();
+  return [...vips, ...rest].filter((c) => (seen.has(c.id) ? false : (seen.add(c.id), true)));
+}
+
 /** Web (Exa) public-milestone pass: validated, dated, sourced news claims for priority contacts. */
 export async function webNewsPass(glist: Contact[], windowDays: number, limit = 25): Promise<void> {
   if (!isConfigured("exa")) return;
   const startDate = new Date(Date.now() - windowDays * 86_400_000).toISOString().slice(0, 10);
-  const priority = glist
-    .filter((c) => !c.isOrganization && ((c.relevance ?? 0) >= 55 || c.highValue))
-    .sort((a, b) => (b.relevance ?? 0) - (a.relevance ?? 0))
-    .slice(0, limit);
+  const priority = selectPriority(glist, limit);
   for (const c of priority) {
     const results = await search({
       query: `${c.name} ${c.company ?? ""} funding OR announcement OR appointed OR award`,
@@ -537,10 +549,7 @@ export async function webNewsPass(glist: Contact[], windowDays: number, limit = 
 /** Surface the single most noteworthy recent X post for a contact and store it as a dated, sourced claim. */
 export async function xNewsPass(glist: Contact[], windowDays: number, limit = 20): Promise<void> {
   if (!isConfigured("x")) return;
-  const priority = glist
-    .filter((c) => !c.isOrganization && ((c.relevance ?? 0) >= 55 || c.highValue))
-    .sort((a, b) => (b.relevance ?? 0) - (a.relevance ?? 0))
-    .slice(0, limit);
+  const priority = selectPriority(glist, limit);
 
   let discoveries = 0; // bound Exa-backed handle discovery per run
   let posts = 0;

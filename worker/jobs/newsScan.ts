@@ -156,6 +156,7 @@ async function pushBreaking(userId: string): Promise<void> {
         replyPropensity: contact.replyPropensity ?? 0,
         projectMatch: 0.5,
         category: s.triggerType,
+        highValue: contact.highValue ?? false,
       },
     );
     if (!g.pass) continue;

@@ -179,6 +179,20 @@ export async function addContactAction(formData: FormData) {
   redirect("/dashboard/contacts?added=1");
 }
 
+/** Flag/unflag a contact as a VIP (must-watch): always news-swept, floored relevance, clears the gate. */
+export async function setHighValueAction(id: string, value: boolean) {
+  if (!id) return;
+  const user = await getPrimaryUser();
+  if (!user) return;
+  await db
+    .update(contacts)
+    .set({ highValue: value })
+    .where(and(eq(contacts.id, id), eq(contacts.userId, user.id)));
+  await runOnce("recompute"); // apply the VIP relevance floor immediately
+  revalidatePath(`/dashboard/contacts/${id}`);
+  revalidatePath("/dashboard/contacts");
+}
+
 /** Permanently delete a contact (and its cascading claims/suggestions). Scoped to the owner. */
 export async function deleteContactAction(id: string) {
   if (!id) return;

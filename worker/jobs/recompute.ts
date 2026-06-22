@@ -128,6 +128,11 @@ export async function runRecompute(): Promise<void> {
 
     const latest = ix.reduce<number>((mx, it) => Math.max(mx, new Date(it.occurredAt).getTime()), 0);
 
+    // VIPs (priority-name match OR a manual "track closely" flag) are important by
+    // definition: floor their relevance so they always clear the news sweep + gate.
+    const isVip = prof.priority || c.highValue || false;
+    const finalRelevance = isVip ? Math.max(relevance, 70) : relevance;
+
     await db
       .update(contacts)
       .set({
@@ -141,9 +146,9 @@ export async function runRecompute(): Promise<void> {
           avgThreadDepth: f.avgThreadDepth,
           lastDays: f.lastDays ?? -1,
         },
-        relevance,
+        relevance: finalRelevance,
         status,
-        highValue: prof.priority || c.highValue || false,
+        highValue: isVip,
         lastContactedAt: latest ? new Date(latest) : c.lastContactedAt,
         gradedAt: new Date(),
       })

@@ -93,6 +93,7 @@ export async function runBrief(slug: string): Promise<void> {
           replyPropensity: contact?.replyPropensity ?? 0,
           projectMatch: 0.5,
           category: s.triggerType,
+          highValue: contact?.highValue ?? false,
         },
       );
       if (g.pass) passed.push(s);

@@ -19,6 +19,7 @@ export type Candidate = {
   replyPropensity: number;
   projectMatch: number;
   category: string;
+  highValue?: boolean;
 };
 
 export type GateResult = { pass: true } | { pass: false; reason: string };
@@ -36,8 +37,11 @@ export function notificationGate(ctx: GateContext, c: Candidate): GateResult {
   if (c.confidence < ctx.gateConfidence) {
     return { pass: false, reason: "below_confidence" };
   }
+  // A VIP (must-watch) contact is relevant to you by definition.
   const relevantToYou =
-    c.replyPropensity >= ctx.gateReplyPropensity || c.projectMatch >= ctx.gateProjectMatch;
+    c.highValue === true ||
+    c.replyPropensity >= ctx.gateReplyPropensity ||
+    c.projectMatch >= ctx.gateProjectMatch;
   if (!relevantToYou) {
     return { pass: false, reason: "not_relevant_to_you" };
   }

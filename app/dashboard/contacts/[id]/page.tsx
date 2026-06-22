@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, Mail, MapPin, ExternalLink, Briefcase, Newspaper, Activity, Users } from "lucide-react";
 import { getContactProfile } from "@/lib/contactProfile";
 import DeleteContactButton from "../DeleteContactButton";
+import VipToggle from "../VipToggle";
 
 export const dynamic = "force-dynamic";
 
@@ -109,7 +110,10 @@ export default async function ContactProfile({ params }: { params: Promise<{ id:
             )}
           </div>
         </div>
-        <DeleteContactButton id={c.id} name={c.name} />
+        <div className="flex shrink-0 items-center gap-2">
+          <VipToggle id={c.id} initial={!!c.highValue} />
+          <DeleteContactButton id={c.id} name={c.name} />
+        </div>
       </div>
 
       {/* Stat strip */}
