@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Mail, MapPin, ExternalLink, Briefcase, Newspaper, Activity, Users } from "lucide-react";
 import { getContactProfile } from "@/lib/contactProfile";
+import DeleteContactButton from "../DeleteContactButton";
 
 export const dynamic = "force-dynamic";
 
@@ -108,6 +109,7 @@ export default async function ContactProfile({ params }: { params: Promise<{ id:
             )}
           </div>
         </div>
+        <DeleteContactButton id={c.id} name={c.name} />
       </div>
 
       {/* Stat strip */}

@@ -1,7 +1,8 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { eq } from "drizzle-orm";
+import { revalidatePath } from "next/cache";
+import { and, eq } from "drizzle-orm";
 import Papa from "papaparse";
 import { db } from "@/db";
 import { contacts } from "@/db/schema";
@@ -176,4 +177,14 @@ export async function addContactAction(formData: FormData) {
   });
   await runOnce("recompute");
   redirect("/dashboard/contacts?added=1");
+}
+
+/** Permanently delete a contact (and its cascading claims/suggestions). Scoped to the owner. */
+export async function deleteContactAction(id: string) {
+  if (!id) return;
+  const user = await getPrimaryUser();
+  if (!user) return;
+  await db.delete(contacts).where(and(eq(contacts.id, id), eq(contacts.userId, user.id)));
+  revalidatePath("/dashboard/contacts");
+  redirect("/dashboard/contacts");
 }
