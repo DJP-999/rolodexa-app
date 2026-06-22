@@ -25,23 +25,24 @@ export type Candidate = {
 export type GateResult = { pass: true } | { pass: false; reason: string };
 
 export function notificationGate(ctx: GateContext, c: Candidate): GateResult {
-  if (ctx.observationUntil && new Date(ctx.observationUntil) > new Date()) {
+  const vip = c.highValue === true;
+  // VIPs (must-watch) bypass the soft noise filters: the observation window and
+  // category suppression exist to reduce general noise, not to mute a VIP's update.
+  if (!vip && ctx.observationUntil && new Date(ctx.observationUntil) > new Date()) {
     return { pass: false, reason: "observation_window" };
   }
   if (ctx.sentToday >= ctx.maxNudgesPerDay) {
     return { pass: false, reason: "daily_cap" };
   }
-  if (ctx.suppressedCategories.has(c.category)) {
+  if (!vip && ctx.suppressedCategories.has(c.category)) {
     return { pass: false, reason: "category_suppressed" };
   }
   if (c.confidence < ctx.gateConfidence) {
     return { pass: false, reason: "below_confidence" };
   }
-  // A VIP (must-watch) contact is relevant to you by definition.
+  // A VIP contact is relevant to you by definition.
   const relevantToYou =
-    c.highValue === true ||
-    c.replyPropensity >= ctx.gateReplyPropensity ||
-    c.projectMatch >= ctx.gateProjectMatch;
+    vip || c.replyPropensity >= ctx.gateReplyPropensity || c.projectMatch >= ctx.gateProjectMatch;
   if (!relevantToYou) {
     return { pass: false, reason: "not_relevant_to_you" };
   }

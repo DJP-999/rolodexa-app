@@ -145,8 +145,15 @@ export async function runBrief(slug: string): Promise<void> {
         .where(and(eq(connectedAccounts.userId, u.id), eq(connectedAccounts.provider, "telegram")))
         .limit(1)
     )[0];
-    if (tg?.externalId) await sendMessage(tg.externalId, message);
+    // Only record a send when Telegram actually accepted it — otherwise leave the
+    // items un-notified so the next brief retries them rather than silently losing them.
+    let delivered = false;
+    if (tg?.externalId) delivered = await sendMessage(tg.externalId, message);
     else console.log(`[brief:${slug}] no telegram chat for ${u.email} — would send:\n${message}`);
+    if (!delivered) {
+      console.log(`[brief:${slug}] not delivered — leaving ${passed.length} item(s) for retry`);
+      continue;
+    }
 
     for (const s of passed) {
       await db.insert(notificationEvents).values({
