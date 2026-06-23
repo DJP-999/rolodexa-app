@@ -21,7 +21,7 @@ async function getContacts() {
   }
 }
 
-async function getFieldGroupings(): Promise<Record<string, { label: string; categories: string[] }>> {
+async function getFieldGroupings(): Promise<Record<string, { label: string; categories: string[]; multi?: boolean }>> {
   try {
     const u = await getPrimaryUser();
     if (!u) return {};
@@ -32,7 +32,7 @@ async function getFieldGroupings(): Promise<Record<string, { label: string; cate
         .where(eq(userContext.userId, u.id))
         .limit(1)
     )[0];
-    return (row?.fg ?? {}) as Record<string, { label: string; categories: string[] }>;
+    return (row?.fg ?? {}) as Record<string, { label: string; categories: string[]; multi?: boolean }>;
   } catch {
     return {};
   }
