@@ -10,6 +10,7 @@ export async function sendMessage(
   chatId: string,
   text: string,
   buttons?: ApprovalButton[],
+  opts?: { plain?: boolean },
 ): Promise<boolean> {
   if (!isConfigured("telegram")) {
     console.warn(`[telegram] not configured — would send to ${chatId}:\n${text}`);
@@ -29,7 +30,8 @@ export async function sendMessage(
       body: JSON.stringify({
         chat_id: chatId,
         text: bubbles[i],
-        parse_mode: "Markdown",
+        // Plain mode avoids "can't parse entities" failures on free-form draft text.
+        ...(opts?.plain ? {} : { parse_mode: "Markdown" }),
         reply_markup: isLast ? keyboard : undefined,
       }),
     });

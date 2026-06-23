@@ -158,6 +158,57 @@ export async function getChatAttendees(chatId: string): Promise<any[]> {
   }
 }
 
+/**
+ * Send a LinkedIn message. If a chatId is known we reply in that chat; otherwise we
+ * start a new chat with the recipient's member id. Returns true only on success.
+ */
+export async function sendLinkedInMessage(
+  accountId: string,
+  opts: { memberId?: string | null; chatId?: string | null; text: string },
+): Promise<boolean> {
+  const client = await getClient();
+  if (!client || !opts.text.trim()) return false;
+  try {
+    if (opts.chatId) {
+      await client.messaging.sendMessage({ chat_id: opts.chatId, text: opts.text });
+      return true;
+    }
+    if (opts.memberId) {
+      await client.messaging.startNewChat({
+        account_id: accountId,
+        attendees_ids: [opts.memberId],
+        text: opts.text,
+      });
+      return true;
+    }
+    return false;
+  } catch (e) {
+    console.error("[unipile] sendLinkedInMessage", e);
+    return false;
+  }
+}
+
+/** Send an email from a connected mailbox. Returns true only on success. */
+export async function sendEmail(
+  accountId: string,
+  opts: { to: string; subject: string; body: string },
+): Promise<boolean> {
+  const client = await getClient();
+  if (!client || !opts.to || !opts.body.trim()) return false;
+  try {
+    await client.email.send({
+      account_id: accountId,
+      to: [{ identifier: opts.to }],
+      subject: opts.subject,
+      body: opts.body,
+    });
+    return true;
+  } catch (e) {
+    console.error("[unipile] sendEmail", e);
+    return false;
+  }
+}
+
 /** Recent emails for a connected mail account (Gmail/Outlook), newest first. */
 export async function getEmails(accountId: string, limit = 200): Promise<any[]> {
   const client = await getClient();

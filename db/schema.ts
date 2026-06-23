@@ -39,6 +39,7 @@ export const contacts = pgTable("contacts", {
   industry: text("industry"), alternateNames: jsonb("alternate_names").$type<string[]>().default([]),
   otherSignals: jsonb("other_signals").$type<string[]>().default([]),
   xHandle: text("x_handle"), xUserId: text("x_user_id"), xCheckedAt: timestamp("x_checked_at", { withTimezone: true }),
+  linkedinMemberId: text("linkedin_member_id"),
   relationship: relationshipCategory("relationship").default("other"),
   relevance: integer("relevance"), replyPropensity: real("reply_propensity"),
   rpFeatures: jsonb("rp_features").$type<Record<string, number>>(), rpVersion: integer("rp_version").default(1),

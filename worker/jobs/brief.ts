@@ -14,20 +14,24 @@ import {
   deriveSuppressedCategories,
   type GateContext,
 } from "@/lib/notifications/gate";
-import { verifyBriefAgainstClaims } from "@/lib/provenance/verify";
 import { sendMessage } from "@/lib/integrations/telegram";
+import { resolveChannel } from "@/lib/outreach/deliver";
 
 function startOfToday(): Date {
   const d = new Date();
   d.setHours(0, 0, 0, 0);
   return d;
 }
+function shortDate(d: string | Date | null): string {
+  if (!d) return "";
+  const dt = new Date(typeof d === "string" && d.length <= 10 ? `${d}T00:00:00` : d);
+  return isNaN(dt.getTime()) ? "" : dt.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
 
 /**
- * Brief composer for one cadence (morning / midday / night). Enforces, in code:
- * observation window + precision gate + daily cap, output verification (every
- * news line must map to a fresh, dated claim), NO_MESSAGE silence, and logs
- * every send to notification_events (the feedback loop's memory).
+ * Brief composer for one cadence. Ranks pending suggestions, runs each through the
+ * notification gate + daily cap, and delivers the survivors to Telegram — one message
+ * per suggestion with Approve / Edit / Decline buttons that actually send the outreach.
  */
 export async function runBrief(slug: string): Promise<void> {
   const us = await db.select().from(users);
@@ -42,7 +46,7 @@ export async function runBrief(slug: string): Promise<void> {
         and(
           eq(suggestions.userId, u.id),
           eq(suggestions.status, "pending"),
-          isNull(suggestions.notifiedAt), // skip anything already pushed (e.g. a breaking ping)
+          isNull(suggestions.notifiedAt),
         ),
       )
       .orderBy(desc(suggestions.score))
@@ -80,7 +84,8 @@ export async function runBrief(slug: string): Promise<void> {
       suppressedCategories: suppressed,
     };
 
-    const passed: typeof pending = [];
+    type Row = (typeof pending)[number] & { contact?: typeof contacts.$inferSelect };
+    const passed: Row[] = [];
     for (const s of pending) {
       if (passed.length >= maxNudges) break;
       const contact = s.contactId
@@ -96,47 +101,13 @@ export async function runBrief(slug: string): Promise<void> {
           highValue: contact?.highValue ?? false,
         },
       );
-      if (g.pass) passed.push(s);
+      if (g.pass) passed.push({ ...s, contact });
     }
 
     if (!passed.length) {
       console.log(`[brief:${slug}] NO_MESSAGE (nothing cleared the gate) for ${u.email}`);
       continue;
     }
-
-    const claimIds = passed.flatMap((s) => s.claimIds ?? []);
-    const freshClaims = claimIds.length
-      ? await db.select().from(claims).where(inArray(claims.id, claimIds))
-      : [];
-    const claimById = new Map(freshClaims.map((c) => [c.id, c]));
-    const shortDate = (d: string | Date | null) =>
-      d ? new Date(typeof d === "string" && d.length <= 10 ? `${d}T00:00:00` : d).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "";
-    const domainOf = (url: string) => {
-      try {
-        return new URL(url).hostname.replace(/^www\./, "");
-      } catch {
-        return "source";
-      }
-    };
-    // Each item leads with the news, links the real source + date, then the ready-to-send draft.
-    const rawBody = passed
-      .map((s) => {
-        const claim = (s.claimIds ?? []).map((id) => claimById.get(id)).find((c) => c?.sourceUrl);
-        const when = claim ? shortDate(claim.publishedDate ?? claim.eventDate) : "";
-        const src = claim?.sourceUrl
-          ? ` — ${when ? `${when} · ` : ""}[${domainOf(claim.sourceUrl)}](${claim.sourceUrl})`
-          : "";
-        return `• ${s.reason}${src}\n${s.draftMessage ?? ""}`;
-      })
-      .join("\n---\n");
-    const { clean, dropped } = verifyBriefAgainstClaims(rawBody, freshClaims);
-    if (dropped.length) {
-      console.log(`[brief:${slug}] verification dropped ${dropped.length} unbacked line(s)`);
-    }
-
-    const header =
-      slug === "night-brief" ? "🌙 Night brief" : slug === "midday-update" ? "🔆 Midday update" : "☀️ Morning brief";
-    const message = `*${header}*\n---\n${clean || rawBody}`;
 
     const tg = (
       await db
@@ -145,33 +116,63 @@ export async function runBrief(slug: string): Promise<void> {
         .where(and(eq(connectedAccounts.userId, u.id), eq(connectedAccounts.provider, "telegram")))
         .limit(1)
     )[0];
-    // Only record a send when Telegram actually accepted it — otherwise leave the
-    // items un-notified so the next brief retries them rather than silently losing them.
-    let delivered = false;
-    if (tg?.externalId) delivered = await sendMessage(tg.externalId, message);
-    else console.log(`[brief:${slug}] no telegram chat for ${u.email} — would send:\n${message}`);
-    if (!delivered) {
-      console.log(`[brief:${slug}] not delivered — leaving ${passed.length} item(s) for retry`);
+    if (!tg?.externalId) {
+      console.log(`[brief:${slug}] no telegram chat for ${u.email}`);
       continue;
     }
 
+    const claimIds = passed.flatMap((s) => s.claimIds ?? []);
+    const freshClaims = claimIds.length
+      ? await db.select().from(claims).where(inArray(claims.id, claimIds))
+      : [];
+    const claimById = new Map(freshClaims.map((c) => [c.id, c]));
+
+    const header =
+      slug === "night-brief" ? "🌙 Night brief" : slug === "midday-update" ? "🔆 Midday update" : "☀️ Morning brief";
+    await sendMessage(tg.externalId, `${header} — ${passed.length} to review`, undefined, { plain: true });
+
+    let sent = 0;
     for (const s of passed) {
-      await db.insert(notificationEvents).values({
-        userId: u.id,
-        suggestionId: s.id,
-        contactId: s.contactId ?? null,
-        triggerType: s.triggerType,
-        category: s.triggerType,
-        channel: "telegram",
-        sentAt: new Date(),
-        outcome: "sent",
-      });
+      const c = s.contact;
+      const claim = (s.claimIds ?? []).map((id) => claimById.get(id)).find((x) => x?.sourceUrl);
+      const when = claim ? shortDate(claim.publishedDate ?? claim.eventDate) : "";
+      const srcLine = claim?.sourceUrl ? `\n${when ? `${when} · ` : ""}${claim.sourceUrl}` : "";
+      const channel = c ? await resolveChannel(c) : null;
+      const via =
+        channel === "linkedin"
+          ? "Approve → sends as a LinkedIn DM"
+          : channel === "email"
+            ? "Approve → sends via email"
+            : "No channel on file — open in app to send";
+      const meta = [c?.role, c?.company].filter(Boolean).join(" · ");
+      const itemText =
+        `${c?.name ?? "Contact"}${meta ? ` — ${meta}` : ""}\n${s.reason}${srcLine}\n\n` +
+        `${s.draftMessage ?? ""}\n\n${via}`;
+      const ok = await sendMessage(
+        tg.externalId,
+        itemText,
+        [
+          { label: "✅ Approve & send", data: `approve:${s.id}` },
+          { label: "✏️ Edit", data: `edit:${s.id}` },
+          { label: "✕ Decline", data: `decline:${s.id}` },
+        ],
+        { plain: true },
+      );
+      if (ok) {
+        sent++;
+        await db.insert(notificationEvents).values({
+          userId: u.id,
+          suggestionId: s.id,
+          contactId: s.contactId ?? null,
+          triggerType: s.triggerType,
+          category: s.triggerType,
+          channel: "telegram",
+          sentAt: new Date(),
+          outcome: "sent",
+        });
+        await db.update(suggestions).set({ notifiedAt: new Date() }).where(eq(suggestions.id, s.id));
+      }
     }
-    // Mark as pushed so no later brief or breaking ping repeats these.
-    await db
-      .update(suggestions)
-      .set({ notifiedAt: new Date() })
-      .where(inArray(suggestions.id, passed.map((s) => s.id)));
-    console.log(`[brief:${slug}] sent ${passed.length} item(s) to ${u.email}`);
+    console.log(`[brief:${slug}] delivered ${sent}/${passed.length} item(s) to ${u.email}`);
   }
 }

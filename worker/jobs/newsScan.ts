@@ -14,6 +14,7 @@ import {
   type GateContext,
 } from "@/lib/notifications/gate";
 import { sendMessage } from "@/lib/integrations/telegram";
+import { resolveChannel } from "@/lib/outreach/deliver";
 import { webNewsPass, xNewsPass } from "./enrichment";
 import { runSuggestions } from "./suggestions";
 
@@ -164,10 +165,26 @@ async function pushBreaking(userId: string): Promise<void> {
     const claim = (
       await db.select().from(claims).where(inArray(claims.id, s.claimIds)).limit(5)
     ).find((c) => c.sourceUrl);
-    const src = claim?.sourceUrl ? `\n[${domainOf(claim.sourceUrl)}](${claim.sourceUrl})` : "";
-    const message = `⚡ *Heads up* — ${contact.name}\n${s.reason}${src}\n---\n${s.draftMessage ?? ""}`;
+    const src = claim?.sourceUrl ? `\n${claim.sourceUrl}` : "";
+    const channel = await resolveChannel(contact);
+    const via =
+      channel === "linkedin"
+        ? "Approve → sends as a LinkedIn DM"
+        : channel === "email"
+          ? "Approve → sends via email"
+          : "No channel on file — open in app to send";
+    const message = `⚡ Heads up — ${contact.name}\n${s.reason}${src}\n\n${s.draftMessage ?? ""}\n\n${via}`;
 
-    const ok = await sendMessage(tg.externalId, message);
+    const ok = await sendMessage(
+      tg.externalId,
+      message,
+      [
+        { label: "✅ Approve & send", data: `approve:${s.id}` },
+        { label: "✏️ Edit", data: `edit:${s.id}` },
+        { label: "✕ Decline", data: `decline:${s.id}` },
+      ],
+      { plain: true },
+    );
     if (!ok) continue;
 
     await db.update(suggestions).set({ notifiedAt: new Date() }).where(eq(suggestions.id, s.id));

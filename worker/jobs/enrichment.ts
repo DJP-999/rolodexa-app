@@ -132,6 +132,7 @@ async function matchLinkedIn(
     const { title, company } = parseHeadline(r.headline);
     const update: Partial<Contact> = {
       linkedinUrl: r.public_profile_url ?? c.linkedinUrl ?? null,
+      linkedinMemberId: r.member_id ? String(r.member_id) : c.linkedinMemberId ?? null,
       role: title ?? c.role,
       isVerifiedPerson: true,
       otherSignals: r.headline ? [r.headline] : c.otherSignals,

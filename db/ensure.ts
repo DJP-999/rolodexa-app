@@ -37,5 +37,7 @@ export async function ensureSchema(sql: {
   await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "x_checked_at" timestamptz`);
   // When a suggestion was pushed (digest or breaking ping) so we never double-send it.
   await sql.unsafe(`ALTER TABLE "suggestions" ADD COLUMN IF NOT EXISTS "notified_at" timestamptz`);
+  // LinkedIn member id per contact, so approved outreach can be sent as a DM.
+  await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "linkedin_member_id" text`);
   console.log("[db] ensureSchema applied.");
 }
