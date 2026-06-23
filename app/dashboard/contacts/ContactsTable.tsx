@@ -150,7 +150,8 @@ export function ContactsTable({
       setLoading(id);
       try {
         const r = await fetch(`/api/contacts/${id}`, { cache: "no-store" });
-        setData((d) => ({ ...d, [id]: await r.json() }));
+        const j = await r.json();
+        setData((d) => ({ ...d, [id]: j }));
       } catch {
         /* ignore */
       } finally {
