@@ -10,6 +10,7 @@ import { runRecompute } from "./jobs/recompute";
 import { runSuggestions } from "./jobs/suggestions";
 import { runBrief } from "./jobs/brief";
 import { runNewsScan } from "./jobs/newsScan";
+import { runNormalize } from "./jobs/normalize";
 import { runAutomation } from "./jobs/automation";
 
 /**
@@ -27,6 +28,7 @@ export const JOBS: JobDef[] = [
   { name: "email-poll", cron: "*/30 * * * *", run: runEmailPoll },
   { name: "enrichment", cron: "0 2 * * *", run: runEnrichment },
   { name: "recompute", cron: "0 4 * * *", run: runRecompute },
+  { name: "normalize", cron: "15 4 * * *", run: runNormalize },
   { name: "suggestions", cron: "0 6 * * *", run: runSuggestions },
   { name: "morning-brief", cron: "0 7 * * *", run: () => runBrief("morning-newsletter") },
   { name: "midday-brief", cron: "30 12 * * *", run: () => runBrief("midday-update") },

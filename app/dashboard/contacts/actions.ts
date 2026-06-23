@@ -86,6 +86,7 @@ export async function importCsvAction(formData: FormData) {
   if (headerIdx === -1) redirect("/dashboard/contacts?error=noheader");
 
   const headers = grid[headerIdx].map(norm);
+  const rawHeaders = grid[headerIdx].map((h) => (h ?? "").trim());
   const body = grid.slice(headerIdx + 1);
 
   const mapped = await mapColumnsLLM(headers, body.slice(0, 3));
@@ -101,23 +102,44 @@ export async function importCsvAction(formData: FormData) {
     mapped.role ?? colIndex(headers, ["position", "organization 1 - title", "title", "role", "job title"]);
   const iLoc = mapped.location ?? colIndex(headers, ["location", "address 1 - city", "city"]);
   const iUrl = mapped.linkedinUrl ?? colIndex(headers, ["url", "linkedin", "profile url"]);
+  const iPhone = mapped.phone ?? colIndex(headers, ["phone", "mobile", "cell"]);
+
+  // Columns already mapped to core fields; everything else is kept as a custom field.
+  const usedIdx = new Set([iName, iFirst, iLast, iEmail, iCompany, iRole, iLoc, iUrl, iPhone].filter((i) => i >= 0));
 
   const at = (row: string[], i: number) => (i >= 0 && row[i] ? row[i].trim() : "");
+  const capturesCustom = (row: string[]): Record<string, string> => {
+    const out: Record<string, string> = {};
+    let n = 0;
+    for (let j = 0; j < row.length && n < 40; j++) {
+      if (usedIdx.has(j)) continue;
+      const key = (rawHeaders[j] || `Column ${j + 1}`).slice(0, 60);
+      const val = (row[j] ?? "").trim().slice(0, 300);
+      if (val) {
+        out[key] = val;
+        n++;
+      }
+    }
+    return out;
+  };
 
   const user = await getPrimaryUser();
   if (!user) redirect("/dashboard/contacts?error=nouser");
 
   const existing = await db
-    .select({ email: contacts.email, name: contacts.name })
+    .select({ id: contacts.id, email: contacts.email, name: contacts.name })
     .from(contacts)
     .where(eq(contacts.userId, user.id));
-  const existEmails = new Set(
-    existing.map((e) => (e.email ? e.email.toLowerCase() : "")).filter(Boolean),
-  );
-  const existNames = new Set(existing.map((e) => norm(e.name)));
+  const idByEmail = new Map<string, string>();
+  const idByName = new Map<string, string>();
+  for (const e of existing) {
+    if (e.email) idByEmail.set(e.email.toLowerCase(), e.id);
+    idByName.set(norm(e.name), e.id);
+  }
 
   const seen = new Set<string>();
   const toInsert: NewContact[] = [];
+  const toUpdate: { id: string; customFields: Record<string, string> }[] = [];
 
   for (const row of body) {
     const built =
@@ -129,8 +151,14 @@ export async function importCsvAction(formData: FormData) {
     const key = email || norm(name);
     if (seen.has(key)) continue;
     seen.add(key);
-    if (email && existEmails.has(email)) continue;
-    if (!email && existNames.has(norm(name))) continue;
+
+    const custom = capturesCustom(row);
+    // Match the contact we already have (email is the stronger key) and backfill, else insert.
+    const existingId = email ? idByEmail.get(email) : idByName.get(norm(name));
+    if (existingId) {
+      if (Object.keys(custom).length) toUpdate.push({ id: existingId, customFields: custom });
+      continue;
+    }
 
     const company = at(row, iCompany);
     const role = at(row, iRole);
@@ -143,15 +171,28 @@ export async function importCsvAction(formData: FormData) {
       location: at(row, iLoc) || null,
       linkedinUrl: at(row, iUrl) || null,
       relationship: guessRelationship(company, role),
+      customFields: custom,
     });
   }
 
   for (let i = 0; i < toInsert.length; i += 500) {
     await db.insert(contacts).values(toInsert.slice(i, i + 500));
   }
-  if (toInsert.length) await enqueue("enrichment");
+  // Backfill the full CSV columns onto existing contacts, in parallel chunks.
+  for (let i = 0; i < toUpdate.length; i += 50) {
+    await Promise.all(
+      toUpdate
+        .slice(i, i + 50)
+        .map((u) => db.update(contacts).set({ customFields: u.customFields }).where(eq(contacts.id, u.id))),
+    );
+  }
 
-  redirect(`/dashboard/contacts?imported=${toInsert.length}`);
+  if (toInsert.length || toUpdate.length) {
+    await enqueue("enrichment");
+    await enqueue("normalize"); // group messy custom-column values into clean categories
+  }
+
+  redirect(`/dashboard/contacts?imported=${toInsert.length}&updated=${toUpdate.length}`);
 }
 
 /** Add a single contact by hand. */

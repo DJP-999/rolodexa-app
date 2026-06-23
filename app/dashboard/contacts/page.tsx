@@ -1,10 +1,11 @@
 import { Suspense } from "react";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { contacts } from "@/db/schema";
+import { contacts, userContext } from "@/db/schema";
+import { getPrimaryUser } from "@/lib/user";
 import { ContactControls } from "./ContactControls";
 import { ContactsFilters } from "./ContactsFilters";
-import { ContactsTableBody } from "./ContactsTableBody";
+import { ContactsTable } from "./ContactsTable";
 
 export const dynamic = "force-dynamic";
 
@@ -20,35 +21,26 @@ async function getContacts() {
   }
 }
 
+async function getFieldGroupings(): Promise<Record<string, { label: string; categories: string[] }>> {
+  try {
+    const u = await getPrimaryUser();
+    if (!u) return {};
+    const row = (
+      await db
+        .select({ fg: userContext.fieldGroupings })
+        .from(userContext)
+        .where(eq(userContext.userId, u.id))
+        .limit(1)
+    )[0];
+    return (row?.fg ?? {}) as Record<string, { label: string; categories: string[] }>;
+  } catch {
+    return {};
+  }
+}
+
 function days(d: Date | null): string {
   if (!d) return "—";
   return String(Math.floor((Date.now() - new Date(d).getTime()) / 86_400_000));
-}
-
-const REL_BADGE: Record<string, string> = {
-  investor: "bg-violet-100 text-violet-700",
-  friend: "bg-rose-100 text-rose-700",
-  coworker: "bg-sky-100 text-sky-700",
-  vendor: "bg-amber-100 text-amber-700",
-  family: "bg-emerald-100 text-emerald-700",
-  other: "bg-black/[0.05] text-muted",
-};
-const DOT: Record<string, string> = {
-  active: "bg-emerald-500",
-  warming: "bg-emerald-500",
-  going_cold: "bg-amber-400",
-  dormant: "bg-gray-300",
-};
-
-function meterColor(r: number | null): string {
-  if (r == null) return "#d1d5db";
-  if (r >= 70) return "#22c55e";
-  if (r >= 50) return "#f59e0b";
-  return "#f59e0b";
-}
-
-function Cell({ children }: { children: React.ReactNode }) {
-  return <td className="px-3 py-3.5 align-top text-[13px] text-muted">{children}</td>;
 }
 
 export default async function ContactsPage({
@@ -59,12 +51,13 @@ export default async function ContactsPage({
     rel?: string;
     tab?: string;
     imported?: string;
+    updated?: string;
     added?: string;
     error?: string;
   }>;
 }) {
   const sp = await searchParams;
-  const all = await getContacts();
+  const [all, fieldGroupings] = await Promise.all([getContacts(), getFieldGroupings()]);
   const enriched = all?.filter((c) => c.enrichedAt).length ?? 0;
 
   const q = (sp.q ?? "").toLowerCase();
@@ -73,9 +66,10 @@ export default async function ContactsPage({
 
   const rows = (all ?? []).filter((c) => {
     if (q) {
+      const cf = Object.values((c.customFields ?? {}) as Record<string, string>).join(" ");
       const hay = `${c.name} ${c.company ?? ""} ${c.role ?? ""} ${c.email ?? ""} ${
         c.industry ?? ""
-      }`.toLowerCase();
+      } ${cf}`.toLowerCase();
       if (!hay.includes(q)) return false;
     }
     if (rel && (c.relationship ?? "other") !== rel) return false;
@@ -83,6 +77,23 @@ export default async function ContactsPage({
     if (tab === "needs" && c.relevance != null) return false;
     return true;
   });
+
+  // Available custom columns across the network (most-populated first).
+  const colCounts = new Map<string, number>();
+  for (const c of all ?? []) {
+    const cf = (c.customFields ?? {}) as Record<string, string>;
+    for (const k of Object.keys(cf)) if (cf[k]) colCounts.set(k, (colCounts.get(k) ?? 0) + 1);
+  }
+  const customColumns = [...colCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 25)
+    .map(([key]) => ({ key, label: key }));
+
+  const facets = Object.entries(fieldGroupings).map(([key, g]) => ({
+    key,
+    label: g.label,
+    categories: g.categories,
+  }));
 
   const banner =
     sp.error != null
@@ -96,7 +107,7 @@ export default async function ContactsPage({
                 : sp.error
         }`
       : sp.imported != null
-        ? `Imported ${sp.imported} new contact${sp.imported === "1" ? "" : "s"}. Enrichment + grading are running in the background — refresh in a bit.`
+        ? `Imported ${sp.imported} new${sp.updated && sp.updated !== "0" ? ` + updated ${sp.updated} existing` : ""} contact${sp.imported === "1" && (!sp.updated || sp.updated === "0") ? "" : "s"}. Enrichment, grading, and column grouping are running in the background — refresh in a bit.`
         : sp.added
           ? "Contact added and your network re-graded."
           : null;
@@ -113,6 +124,8 @@ export default async function ContactsPage({
     status: c.status,
     highValue: c.highValue,
     lastDays: days(c.lastContactedAt),
+    customFields: (c.customFields ?? {}) as Record<string, string>,
+    normalizedFields: (c.normalizedFields ?? {}) as Record<string, string>,
   }));
 
   return (
@@ -146,22 +159,7 @@ export default async function ContactsPage({
           No contacts match. Import a CSV or add one to get started.
         </p>
       ) : (
-        <div className="mt-4 overflow-hidden rounded-2xl border border-hairline bg-white">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-hairline text-left text-xs text-muted">
-                <th className="px-3 py-3 font-normal">Name</th>
-                <th className="px-3 py-3 font-normal">Company</th>
-                <th className="px-3 py-3 font-normal">Industry</th>
-                <th className="px-3 py-3 font-normal">Location</th>
-                <th className="px-3 py-3 font-normal">Relationship</th>
-                <th className="px-3 py-3 font-normal">Relevance</th>
-                <th className="px-3 py-3 font-normal">Days</th>
-              </tr>
-            </thead>
-            <ContactsTableBody rows={tableRows} />
-          </table>
-        </div>
+        <ContactsTable rows={tableRows} customColumns={customColumns} facets={facets} />
       )}
     </div>
   );

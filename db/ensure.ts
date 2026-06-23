@@ -39,5 +39,10 @@ export async function ensureSchema(sql: {
   await sql.unsafe(`ALTER TABLE "suggestions" ADD COLUMN IF NOT EXISTS "notified_at" timestamptz`);
   // LinkedIn member id per contact, so approved outreach can be sent as a DM.
   await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "linkedin_member_id" text`);
+  // Full imported CSV columns (raw) + Dexa's normalized canonical values per contact.
+  await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "custom_fields" jsonb DEFAULT '{}'::jsonb`);
+  await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "normalized_fields" jsonb DEFAULT '{}'::jsonb`);
+  // Per-column grouping config (label + canonical category list) used for facets.
+  await sql.unsafe(`ALTER TABLE "user_context" ADD COLUMN IF NOT EXISTS "field_groupings" jsonb DEFAULT '{}'::jsonb`);
   console.log("[db] ensureSchema applied.");
 }
