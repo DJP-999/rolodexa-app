@@ -84,15 +84,21 @@ export default async function ContactsPage({
     const cf = (c.customFields ?? {}) as Record<string, string>;
     for (const k of Object.keys(cf)) if (cf[k]) colCounts.set(k, (colCounts.get(k) ?? 0) + 1);
   }
-  const customColumns = [...colCounts.entries()]
+  const customFromCsv = [...colCounts.entries()]
     .sort((a, b) => b[1] - a[1])
     .slice(0, 25)
     .map(([key]) => ({ key, label: key }));
+  // Derived facet columns (Firm Type, Check Size, Region) aren't raw CSV columns.
+  const derivedCols = Object.entries(fieldGroupings)
+    .filter(([key]) => !colCounts.has(key))
+    .map(([key, g]) => ({ key, label: g.label }));
+  const customColumns = [...derivedCols, ...customFromCsv];
 
   const facets = Object.entries(fieldGroupings).map(([key, g]) => ({
     key,
     label: g.label,
     categories: g.categories,
+    multi: g.multi,
   }));
 
   const banner =

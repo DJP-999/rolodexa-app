@@ -19,7 +19,7 @@ export type Row = {
   customFields: Record<string, string>;
   normalizedFields: Record<string, string>;
 };
-export type Facet = { key: string; label: string; categories: string[] };
+export type Facet = { key: string; label: string; categories: string[]; multi?: boolean };
 type ColDef = { key: string; label: string; custom?: boolean };
 
 const CORE: { key: string; label: string }[] = [
@@ -139,7 +139,8 @@ export function ContactsTable({
     facets.every((f) => {
       const sel = facetSel[f.key];
       if (!sel) return true;
-      return (r.normalizedFields?.[f.key] ?? r.customFields?.[f.key] ?? "") === sel;
+      const val = r.normalizedFields?.[f.key] ?? r.customFields?.[f.key] ?? "";
+      return f.multi ? val.split(" | ").includes(sel) : val === sel;
     }),
   );
 

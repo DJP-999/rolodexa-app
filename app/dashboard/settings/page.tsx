@@ -33,7 +33,9 @@ const TIMEZONES: [string, string][] = [
 const JOB_META: [string, string, string][] = [
   ["enrichment", "Enrichment", "2:00 AM"],
   ["recompute", "Re-grade relevance", "4:00 AM"],
+  ["normalize", "Group columns", "4:15 AM"],
   ["suggestions", "Suggestions", "6:00 AM"],
+  ["news-scan", "News scan", "10a/3p/6p"],
   ["email-poll", "Email Poll", "Every 30m"],
   ["morning-brief", "Morning brief", "7:00 AM"],
   ["midday-brief", "Midday update", "12:30 PM"],
