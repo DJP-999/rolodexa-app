@@ -120,18 +120,25 @@ export async function getProfile(
 export async function getChats(accountId: string, after?: string): Promise<any[]> {
   const client = await getClient();
   if (!client) return [];
+  const out: any[] = [];
+  let cursor: string | undefined;
   try {
-    const res: any = await client.messaging.getAllChats({
-      account_type: "LINKEDIN",
-      account_id: accountId,
-      limit: 100,
-      ...(after ? { after } : {}),
-    });
-    return res?.items ?? res?.data ?? [];
+    do {
+      const res: any = await client.messaging.getAllChats({
+        account_type: "LINKEDIN",
+        account_id: accountId,
+        limit: 100,
+        ...(cursor ? { cursor } : {}),
+        ...(after ? { after } : {}),
+      });
+      const items: any[] = res?.items ?? res?.data ?? [];
+      out.push(...items);
+      cursor = res?.cursor ?? res?.paging?.cursor ?? res?.next_cursor ?? undefined;
+    } while (cursor && out.length < 500);
   } catch (e) {
     console.error("[unipile] getChats", e);
-    return [];
   }
+  return out;
 }
 
 export async function getChatMessages(chatId: string): Promise<any[]> {
