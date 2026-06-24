@@ -44,5 +44,7 @@ export async function ensureSchema(sql: {
   await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "normalized_fields" jsonb DEFAULT '{}'::jsonb`);
   // Per-column grouping config (label + canonical category list) used for facets.
   await sql.unsafe(`ALTER TABLE "user_context" ADD COLUMN IF NOT EXISTS "field_groupings" jsonb DEFAULT '{}'::jsonb`);
+  // LLM-graded domain/thesis fit (0..1) of a contact to the user's focus — drives relevance.
+  await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "professional_fit" real`);
   console.log("[db] ensureSchema applied.");
 }

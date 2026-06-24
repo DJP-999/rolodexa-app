@@ -17,6 +17,7 @@ import { getXUserByUsername, getRecentTweets, normalizeHandle } from "@/lib/inte
 import { complete } from "@/lib/llm";
 import { deriveWritingStyle } from "@/lib/agent/style";
 import { runRecompute } from "./recompute";
+import { runFitGrade } from "./fitGrade";
 
 type Contact = typeof contacts.$inferSelect;
 
@@ -784,6 +785,9 @@ export async function runEnrichment(): Promise<void> {
     await webNewsPass(glist, windowDays);
     await xNewsPass(glist, windowDays);
   }
+
+  // Re-grade domain fit now that profiles are fresh; this also re-runs relevance.
+  await runFitGrade();
 
   console.log("[enrichment] pass complete");
 }

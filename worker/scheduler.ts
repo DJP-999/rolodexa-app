@@ -7,6 +7,7 @@ import { env } from "@/lib/env";
 import { runEmailPoll } from "./jobs/emailPoll";
 import { runEnrichment } from "./jobs/enrichment";
 import { runRecompute } from "./jobs/recompute";
+import { runFitGrade } from "./jobs/fitGrade";
 import { runSuggestions } from "./jobs/suggestions";
 import { runBrief } from "./jobs/brief";
 import { runNewsScan } from "./jobs/newsScan";
@@ -27,6 +28,7 @@ type JobDef = { name: string; cron: string; run: () => Promise<void> };
 export const JOBS: JobDef[] = [
   { name: "email-poll", cron: "*/30 * * * *", run: runEmailPoll },
   { name: "enrichment", cron: "0 2 * * *", run: runEnrichment },
+  { name: "fit-grade", cron: "30 3 * * *", run: runFitGrade },
   { name: "recompute", cron: "0 4 * * *", run: runRecompute },
   { name: "normalize", cron: "15 4 * * *", run: runNormalize },
   { name: "suggestions", cron: "0 6 * * *", run: runSuggestions },

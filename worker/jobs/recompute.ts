@@ -9,13 +9,15 @@ import {
   type Weights,
 } from "@/lib/scoring/relevance";
 
+// Fit-first defaults: professional (now an LLM domain-fit grade) dominates, so who a
+// contact IS matters more than how recently you happened to email them.
 const DEFAULT_WEIGHTS: Weights = {
-  professional: 30,
-  recency: 25,
-  relationship: 20,
-  geographic: 15,
+  professional: 45,
+  recency: 20,
+  relationship: 15,
+  geographic: 8,
   trigger: 0,
-  replyPropensity: 10,
+  replyPropensity: 12,
 };
 
 type Ctx = {
@@ -37,25 +39,35 @@ function tokenize(s: string): string[] {
  * makes onboarding actually move the score.
  */
 function professionalSignal(
-  c: { name: string; company: string | null; role: string | null; industry: string | null; relationship: string | null },
+  c: {
+    name: string;
+    company: string | null;
+    role: string | null;
+    industry: string | null;
+    relationship: string | null;
+    professionalFit?: number | null;
+  },
   ctx: Ctx,
 ): { signal: number; priority: boolean } {
-  if (!ctx) return { signal: 0.5, priority: false };
+  // Priority-name match is always evaluated — it drives the VIP floor regardless of fit.
+  let priority = false;
+  if (ctx?.priorityConnections && c.name) {
+    const pri = ctx.priorityConnections.toLowerCase();
+    const full = c.name.toLowerCase();
+    const first = full.split(/\s+/)[0];
+    if (pri.includes(full) || (first.length > 2 && pri.includes(first))) priority = true;
+  }
+
+  // Prefer the LLM-graded domain/thesis fit; fall back to shallow keyword overlap only
+  // until a contact has been fit-graded.
+  if (typeof c.professionalFit === "number") return { signal: c.professionalFit, priority };
+
+  if (!ctx) return { signal: 0.5, priority };
   const hay = [c.name, c.company, c.role, c.industry].filter(Boolean).join(" ").toLowerCase();
   const needles = tokenize([ctx.currentFocus, ctx.activeProjects, ctx.role].filter(Boolean).join(" "));
   const hits = needles.filter((t) => hay.includes(t)).length;
   let s = 0.35 + Math.min(0.4, hits * 0.1);
-
-  let priority = false;
-  if (ctx.priorityConnections && c.name) {
-    const pri = ctx.priorityConnections.toLowerCase();
-    const full = c.name.toLowerCase();
-    const first = full.split(/\s+/)[0];
-    if (pri.includes(full) || (first.length > 2 && pri.includes(first))) {
-      s += 0.25;
-      priority = true;
-    }
-  }
+  if (priority) s += 0.25;
   if (c.relationship === "investor") s += 0.1;
   return { signal: Math.min(1, s), priority };
 }
@@ -128,10 +140,14 @@ export async function runRecompute(): Promise<void> {
 
     const latest = ix.reduce<number>((mx, it) => Math.max(mx, new Date(it.occurredAt).getTime()), 0);
 
-    // VIPs (priority-name match OR a manual "track closely" flag) are important by
-    // definition: floor their relevance so they always clear the news sweep + gate.
+    // Domain-fit-first: floor relevance by the LLM fit grade so a prominent, on-thesis
+    // contact (e.g. a senior secondaries investor) ranks high even with no interaction
+    // history. VIPs (priority-name match OR manual "track closely") keep their own floor.
+    const fit = c.professionalFit ?? null;
+    const fitFloor = fit == null ? 0 : fit >= 0.85 ? 78 : fit >= 0.7 ? 66 : fit >= 0.55 ? 56 : 0;
     const isVip = prof.priority || c.highValue || false;
-    const finalRelevance = isVip ? Math.max(relevance, 70) : relevance;
+    const vipFloor = isVip ? 70 : 0;
+    const finalRelevance = Math.max(relevance, fitFloor, vipFloor);
 
     await db
       .update(contacts)

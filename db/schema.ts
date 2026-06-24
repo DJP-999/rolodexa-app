@@ -49,7 +49,7 @@ export const contacts = pgTable("contacts", {
   status: contactStatus("status").default("active"), highValue: boolean("high_value").default(false),
   importPriority: real("import_priority"), lastContactedAt: timestamp("last_contacted_at", { withTimezone: true }),
   enrichedAt: timestamp("enriched_at", { withTimezone: true }), gradedAt: timestamp("graded_at", { withTimezone: true }),
-  gradeRationale: text("grade_rationale"), summary: text("summary"), profileData: jsonb("profile_data").$type<Record<string, unknown>>(), embedding: vector("embedding", { dimensions: 1536 }),
+  gradeRationale: text("grade_rationale"), summary: text("summary"), professionalFit: real("professional_fit"), profileData: jsonb("profile_data").$type<Record<string, unknown>>(), embedding: vector("embedding", { dimensions: 1536 }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (t) => ({ userIdx: index("contacts_user_idx").on(t.userId), emailIdx: index("contacts_email_idx").on(t.userId, t.email), relevanceIdx: index("contacts_relevance_idx").on(t.userId, t.relevance) }));
 export const claims = pgTable("claims", {

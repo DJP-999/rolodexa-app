@@ -32,6 +32,7 @@ const TIMEZONES: [string, string][] = [
 
 const JOB_META: [string, string, string][] = [
   ["enrichment", "Enrichment", "2:00 AM"],
+  ["fit-grade", "Score domain fit", "3:30 AM"],
   ["recompute", "Re-grade relevance", "4:00 AM"],
   ["normalize", "Group columns", "4:15 AM"],
   ["suggestions", "Suggestions", "6:00 AM"],
