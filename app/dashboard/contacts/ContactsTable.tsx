@@ -32,6 +32,8 @@ const CORE: { key: string; label: string }[] = [
 ];
 const DEFAULT_VISIBLE = ["company", "industry", "location", "relationship", "relevance", "days"];
 const STORAGE_KEY = "rolodexa.contactCols";
+const ORDER_KEY = "rolodexa.contactOrder";
+const SORT_KEY = "rolodexa.contactSort";
 
 const REL_BADGE: Record<string, string> = {
   investor: "bg-violet-100 text-violet-700",
@@ -106,6 +108,9 @@ export function ContactsTable({
   const allCols: ColDef[] = [...CORE, ...customColumns.map((c) => ({ ...c, custom: true }))];
 
   const [visible, setVisible] = useState<string[]>(DEFAULT_VISIBLE);
+  const [order, setOrder] = useState<string[]>([]);
+  const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
+  const [dragKey, setDragKey] = useState<string | null>(null);
   const [facetSel, setFacetSel] = useState<Record<string, string>>({});
   const [picker, setPicker] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
@@ -114,12 +119,40 @@ export function ContactsTable({
 
   useEffect(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) setVisible(JSON.parse(saved));
+      const v = localStorage.getItem(STORAGE_KEY);
+      if (v) setVisible(JSON.parse(v));
+      const o = localStorage.getItem(ORDER_KEY);
+      if (o) setOrder(JSON.parse(o));
+      const s = localStorage.getItem(SORT_KEY);
+      if (s) setSort(JSON.parse(s));
     } catch {
       /* ignore */
     }
   }, []);
+
+  const persistOrder = (next: string[]) => {
+    setOrder(next);
+    try {
+      localStorage.setItem(ORDER_KEY, JSON.stringify(next));
+    } catch {
+      /* ignore */
+    }
+  };
+  const toggleSort = (key: string) =>
+    setSort((s) => {
+      const next =
+        !s || s.key !== key
+          ? { key, dir: "asc" as const }
+          : s.dir === "asc"
+            ? { key, dir: "desc" as const }
+            : null;
+      try {
+        localStorage.setItem(SORT_KEY, JSON.stringify(next));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
 
   const persist = (next: string[]) => {
     setVisible(next);
@@ -132,8 +165,49 @@ export function ContactsTable({
   const toggleCol = (key: string) =>
     persist(visible.includes(key) ? visible.filter((k) => k !== key) : [...visible, key]);
 
-  const shownCols = allCols.filter((c) => visible.includes(c.key));
+  // Columns in the user's saved order; unknown/new columns fall to the end.
+  const orderedKeys = [
+    ...order.filter((k) => allCols.some((c) => c.key === k)),
+    ...allCols.map((c) => c.key).filter((k) => !order.includes(k)),
+  ];
+  const shownCols = orderedKeys
+    .map((k) => allCols.find((c) => c.key === k))
+    .filter((c): c is ColDef => !!c && visible.includes(c.key));
   const colSpan = shownCols.length + 1; // + name column
+
+  const onDropCol = (targetKey: string) => {
+    if (!dragKey || dragKey === targetKey) return;
+    const base = orderedKeys.slice();
+    const from = base.indexOf(dragKey);
+    if (from < 0) return;
+    base.splice(from, 1);
+    base.splice(base.indexOf(targetKey), 0, dragKey);
+    persistOrder(base);
+    setDragKey(null);
+  };
+
+  const sortVal = (r: Row, key: string): string | number => {
+    switch (key) {
+      case "name":
+        return r.name.toLowerCase();
+      case "company":
+        return (r.company ?? "").toLowerCase();
+      case "industry":
+        return (r.industry ?? "").toLowerCase();
+      case "location":
+        return (r.location ?? "").toLowerCase();
+      case "relationship":
+        return (r.relationship ?? "").toLowerCase();
+      case "relevance":
+        return r.relevance ?? -1;
+      case "days": {
+        const n = parseInt(r.lastDays, 10);
+        return isNaN(n) ? Number.MAX_SAFE_INTEGER : n;
+      }
+      default:
+        return (r.normalizedFields?.[key] ?? r.customFields?.[key] ?? "").toLowerCase();
+    }
+  };
 
   const filtered = rows.filter((r) =>
     facets.every((f) => {
@@ -143,6 +217,17 @@ export function ContactsTable({
       return f.multi ? val.split(" | ").includes(sel) : val === sel;
     }),
   );
+  const sorted = sort
+    ? [...filtered].sort((a, b) => {
+        const av = sortVal(a, sort.key);
+        const bv = sortVal(b, sort.key);
+        const c =
+          typeof av === "number" && typeof bv === "number"
+            ? av - bv
+            : String(av).localeCompare(String(bv));
+        return sort.dir === "asc" ? c : -c;
+      })
+    : filtered;
 
   const toggleRow = async (id: string) => {
     if (open === id) return setOpen(null);
@@ -254,16 +339,31 @@ export function ContactsTable({
         <table className="w-full">
           <thead>
             <tr className="border-b border-hairline text-left text-xs text-muted">
-              <th className="px-3 py-3 font-normal">Name</th>
+              <th
+                onClick={() => toggleSort("name")}
+                className="cursor-pointer select-none px-3 py-3 font-normal hover:text-ink"
+              >
+                Name{sort?.key === "name" ? (sort.dir === "asc" ? " ↑" : " ↓") : ""}
+              </th>
               {shownCols.map((c) => (
-                <th key={c.key} className="px-3 py-3 font-normal whitespace-nowrap">
+                <th
+                  key={c.key}
+                  draggable
+                  onDragStart={() => setDragKey(c.key)}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={() => onDropCol(c.key)}
+                  onClick={() => toggleSort(c.key)}
+                  title="Click to sort · drag to reorder"
+                  className="cursor-pointer select-none whitespace-nowrap px-3 py-3 font-normal hover:text-ink"
+                >
                   {c.label}
+                  {sort?.key === c.key ? (sort.dir === "asc" ? " ↑" : " ↓") : ""}
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {filtered.map((r) => {
+            {sorted.map((r) => {
               const expanded = open === r.id;
               const d = data[r.id];
               return (

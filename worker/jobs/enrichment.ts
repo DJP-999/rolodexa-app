@@ -7,6 +7,7 @@ import {
   getAllRelations,
   getChats,
   getChatMessages,
+  getChatAttendees,
   getEmails,
   getProfile,
 } from "@/lib/integrations/unipile";
@@ -277,14 +278,56 @@ async function syncLinkedInMessages(
   userId: string,
   liId: string,
   providerToContact: Map<string, string>,
+  contactsList: Contact[],
 ): Promise<void> {
-  if (providerToContact.size === 0) return;
   const chats = await getChats(liId);
+  if (!chats.length) return;
+  // Attribute a chat to a contact by the attendee's provider-id (matched relations)
+  // OR by the attendee's NAME (against ALL contacts) — so messages with people who
+  // weren't matched to a 1st-degree relation still land on the right contact.
+  const nameMap = new Map<string, string>();
+  for (const c of contactsList) {
+    const nk = nameKey(c.name);
+    if (nk) nameMap.set(nk, c.id);
+  }
   let n = 0;
-  for (const chat of chats.slice(0, 60)) {
-    const pid = chat?.attendee_provider_id ? String(chat.attendee_provider_id) : null;
-    const contactId = pid ? providerToContact.get(pid) : undefined;
-    if (!contactId || !chat?.id) continue;
+  let attLookups = 0;
+  for (const chat of chats.slice(0, 250)) {
+    if (!chat?.id) continue;
+    let contactId: string | undefined;
+    const pid = chat.attendee_provider_id ? String(chat.attendee_provider_id) : null;
+    if (pid) contactId = providerToContact.get(pid);
+    if (!contactId) {
+      const nm =
+        typeof chat.attendee_name === "string"
+          ? chat.attendee_name
+          : typeof chat.name === "string"
+            ? chat.name
+            : null;
+      if (nm) contactId = nameMap.get(nameKey(nm));
+    }
+    // Last resort: fetch the chat's attendees and match by provider-id or name.
+    if (!contactId && attLookups < 200) {
+      attLookups++;
+      const atts = await getChatAttendees(String(chat.id));
+      for (const a of atts) {
+        const apid = a?.provider_id ?? a?.attendee_provider_id ?? null;
+        if (apid && providerToContact.get(String(apid))) {
+          contactId = providerToContact.get(String(apid));
+          break;
+        }
+        const anm =
+          typeof a?.name === "string" ? a.name : typeof a?.display_name === "string" ? a.display_name : null;
+        if (anm) {
+          const hit = nameMap.get(nameKey(anm));
+          if (hit) {
+            contactId = hit;
+            break;
+          }
+        }
+      }
+    }
+    if (!contactId) continue;
     const msgs = await getChatMessages(String(chat.id));
     for (const m of msgs.slice(0, 25)) {
       if (!m?.id || !m?.timestamp) continue;
@@ -298,6 +341,7 @@ async function syncLinkedInMessages(
           eventType: m.is_sender ? "message_out" : "message_in",
           direction: m.is_sender ? "outbound" : "inbound",
           channel: "linkedin",
+          threadId: String(chat.id),
           occurredAt: when,
           sourceRef: String(m.id),
           metadata: { text: typeof m.text === "string" ? m.text.slice(0, 200) : null },
@@ -306,7 +350,7 @@ async function syncLinkedInMessages(
     }
     n++;
   }
-  console.log(`[enrichment] LinkedIn messages synced across ${n} chats`);
+  console.log(`[enrichment] LinkedIn messages synced across ${n} chats (${attLookups} attendee lookups)`);
 }
 
 /** Best-effort plain-text snippet of an email body, stripped of HTML and quoted replies. */
@@ -688,7 +732,7 @@ export async function runEnrichment(): Promise<void> {
     const { providerToContact, candidates } = await matchLinkedIn(userId, list, liId);
     candidatesByUser.set(userId, candidates);
 
-    if (liId) await syncLinkedInMessages(userId, liId, providerToContact);
+    if (liId) await syncLinkedInMessages(userId, liId, providerToContact, list);
 
     const emailId = await accountId(userId, "email");
     if (emailId) await syncEmail(userId, emailId);
