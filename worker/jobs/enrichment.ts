@@ -12,6 +12,7 @@ import {
   getProfile,
 } from "@/lib/integrations/unipile";
 import { writeClaim } from "@/lib/provenance/claims";
+import { mentionsContact } from "@/lib/match/entity";
 import { getXUserByUsername, getRecentTweets, normalizeHandle } from "@/lib/integrations/x";
 import { complete } from "@/lib/llm";
 import { deriveWritingStyle } from "@/lib/agent/style";
@@ -487,7 +488,13 @@ async function extractNews(
   windowDays: number,
 ): Promise<{ value: string; url: string; eventDate: string }[]> {
   if (!results.length) return [];
-  const payload = results.map((r, i) => ({
+  // Deterministic guard FIRST: only consider results that actually name this person or
+  // their exact firm. A shared token ("Ion Pacific" vs "Ion Video") is not a match.
+  const candidates = results.filter((r) =>
+    mentionsContact(c, `${r.title ?? ""} ${r.text ?? ""} ${(r.highlights ?? []).join(" ")} ${r.url}`),
+  );
+  if (!candidates.length) return [];
+  const payload = candidates.map((r, i) => ({
     i,
     title: r.title ?? "",
     url: r.url,
@@ -497,17 +504,19 @@ async function extractNews(
   const raw = await complete({
     tier: "cheap",
     system:
-      "You validate web search results about a specific professional contact for a relationship CRM. " +
-      "For each result decide: is it genuinely about THIS person (same individual — not a namesake at a different company or field), " +
-      "and does it report a NOTEWORTHY, RECENT professional event (funding, new role or promotion, company launch, award, acquisition, board seat, major milestone)? " +
-      "Give the event date if stated. Be strict: when unsure it's the same person, mark about_this_person false. Return JSON only.",
+      "You validate web search results about a specific professional contact (and their firm) for a relationship CRM. " +
+      "For each result decide TWO things: (1) is it genuinely about THIS exact person OR their EXACT firm — NOT a different person or a company that merely shares a word or partial name " +
+      "(e.g. an article about 'Ion Video' is NOT about a contact at 'Ion Pacific'; 'Acme Capital' is NOT 'Acme Health'; a shared first word is NOT a match); and " +
+      "(2) does it report a NOTEWORTHY, RECENT professional event (funding, new role or promotion, company launch, award, acquisition, board seat, major milestone)? " +
+      "The person or firm named in the article must match exactly. Be strict: when unsure it is the same person/firm, mark about_this_person false. " +
+      "The summary MUST explicitly name the matched person or firm. Give the event date if stated. Return JSON only.",
     messages: [
       {
         role: "user",
         content:
           `Person: ${c.name}; Company: ${c.company ?? "unknown"}; Role: ${c.role ?? "unknown"}.\n` +
           `Results: ${JSON.stringify(payload)}\n` +
-          `Return a JSON array [{"i":number,"about_this_person":boolean,"noteworthy":boolean,"event_date":"YYYY-MM-DD"|null,"summary":"one factual sentence"}].`,
+          `Return a JSON array [{"i":number,"about_this_person":boolean,"noteworthy":boolean,"event_date":"YYYY-MM-DD"|null,"summary":"one factual sentence that names the person or firm"}].`,
       },
     ],
     maxTokens: 800,
@@ -517,8 +526,8 @@ async function extractNews(
     const arr = JSON.parse(raw.match(/\[[\s\S]*\]/)?.[0] ?? "[]");
     const out: { value: string; url: string; eventDate: string }[] = [];
     for (const x of arr) {
-      if (!(x?.about_this_person && x?.noteworthy && typeof x.i === "number" && results[x.i])) continue;
-      const r = results[x.i];
+      if (!(x?.about_this_person && x?.noteworthy && typeof x.i === "number" && candidates[x.i])) continue;
+      const r = candidates[x.i];
       const dated = parseLiDate(x.event_date) ?? parseLiDate(r.publishedDate);
       if (!dated || dated.ageDays < 0 || dated.ageDays > windowDays) continue; // recency gate
       out.push({ value: String(x.summary || r.title || r.url), url: r.url, eventDate: dated.iso });
@@ -576,8 +585,10 @@ export async function webNewsPass(glist: Contact[], windowDays: number, limit = 
   const startDate = new Date(Date.now() - windowDays * 86_400_000).toISOString().slice(0, 10);
   const priority = selectPriority(glist, limit);
   for (const c of priority) {
+    // Quote the firm so Exa weights the exact phrase, not a shared first word.
+    const firmQ = c.company ? `"${c.company}" ` : "";
     const results = await search({
-      query: `${c.name} ${c.company ?? ""} funding OR announcement OR appointed OR award`,
+      query: `${firmQ}${c.name} funding OR announcement OR appointed OR award`,
       startPublishedDate: startDate,
       numResults: 4,
     });

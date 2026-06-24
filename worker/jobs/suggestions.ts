@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { claims, contacts, suggestions, userContext } from "@/db/schema";
 import { cadenceForRelevance } from "@/lib/scoring/relevance";
 import { isNews } from "@/lib/provenance/claims";
+import { mentionsContact } from "@/lib/match/entity";
 import { complete } from "@/lib/llm";
 import { TONE_GUIDE, stripEmDashes } from "@/lib/agent/tone";
 
@@ -131,7 +132,12 @@ export async function runSuggestions(): Promise<void> {
 
     // --- News / job-change: a fresh, dated, sourced moment ---
     const cl = await db.select().from(claims).where(eq(claims.contactId, c.id));
-    const fresh = cl.filter((x) => isNews(x));
+    const fresh = cl
+      .filter((x) => isNews(x))
+      // Web 'news' claims must verifiably reference this contact's firm/name — drops
+      // mismatched items (e.g. an "Ion Video" article stored against an "Ion Pacific"
+      // contact). job_change (LinkedIn) and x_post (verified handle) are trusted.
+      .filter((x) => x.field !== "news" || mentionsContact(c, `${x.value} ${x.sourceUrl ?? ""}`));
     if (fresh.length) {
       const chosen =
         fresh.find((x) => x.field === "job_change") ??
