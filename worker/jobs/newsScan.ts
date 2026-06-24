@@ -55,6 +55,15 @@ export async function runNewsScan(): Promise<void> {
 
   // 1) Gather fresh signals for each user's top contacts.
   for (const [, list] of byUser) {
+    // Clear ALL prior web-news claims for this user's contacts first — including
+    // lower-ranked ones the re-derive below won't reach — so stale or mis-attributed
+    // items (e.g. a "Multipli" article wrongly tied to "Multiplicity Partners") never linger.
+    const ids = list.map((c) => c.id);
+    for (let i = 0; i < ids.length; i += 200) {
+      await db
+        .delete(claims)
+        .where(and(inArray(claims.contactId, ids.slice(i, i + 200)), eq(claims.field, "news")));
+    }
     const top = list
       .filter((c) => !c.isOrganization && ((c.relevance ?? 0) >= 60 || c.highValue))
       .sort((a, b) => (b.relevance ?? 0) - (a.relevance ?? 0))
