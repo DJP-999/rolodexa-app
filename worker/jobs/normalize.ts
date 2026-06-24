@@ -25,7 +25,48 @@ const FIRM_TYPES = [
   "Endowment / Foundation",
   "Other",
 ];
-const CHECK_SIZES = ["< $5M", "$5–25M", "$25–100M", "$100M+", "Unknown"];
+/** Bucket a free-form check size ("$1-5M", "$250k", "$1B") into a fixed band. */
+function bandCheckSize(raw: string): string {
+  const vals: number[] = [];
+  const re = /(\d+(?:\.\d+)?)\s*(b(?:illion|n)?|mm?|million|k|thousand)?/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(raw)) !== null) {
+    if (!m[1]) continue;
+    let n = parseFloat(m[1]);
+    const u = (m[2] || "").toLowerCase();
+    if (u.startsWith("b")) n *= 1000;
+    else if (u.startsWith("k") || u.startsWith("t")) n /= 1000;
+    vals.push(n); // m / million / no unit -> millions
+  }
+  if (!vals.length) return "Unknown";
+  const max = Math.max(...vals);
+  if (max <= 5) return "< $5M";
+  if (max <= 25) return "$5-25M";
+  if (max <= 100) return "$25-100M";
+  return "$100M+";
+}
+
+/** Bucket a free-form region into a fixed set (first match wins, specific before generic). */
+function regionBucket(raw: string): string {
+  const r = raw.toLowerCase();
+  const has = (...ks: string[]) => ks.some((k) => r.includes(k));
+  if (has("global", "worldwide", "international")) return "Global";
+  if (has("latam", "latin america", "brazil", "mexico", "south america", "argentina", "chile", "colombia"))
+    return "LATAM";
+  if (has("mena", "middle east", "gcc", "israel", "dubai", "uae", "saudi", "turkey", "qatar")) return "MENA";
+  if (has("asia", "india", "japan", "korea", "china", "singapore", "philippines", "vietnam", "indonesia"))
+    return "Asia";
+  if (has("uk", "united kingdom", "britain", "london", "england")) return "UK";
+  if (has("europe", "eu ", " eu", "germany", "france", "spain", "sweden", "italy", "netherlands", "cee", "baltics", "ukraine", "nordic"))
+    return "Europe";
+  if (has("northeast", "new england", "new york", "boston", "philadelphia", "connecticut")) return "US Northeast";
+  if (has("midwest", "chicago", "ohio", "michigan")) return "US Midwest";
+  if (has("us west", "silicon valley", "palo alto", "california", "san francisco", "bay area", "seattle", "northwest", "los angeles"))
+    return "US West";
+  if (has("us south", "southeast", "texas", "florida", "dallas", "atlanta", "miami", "se us")) return "US South";
+  if (has("north america", "united states", "u.s", "usa", "us ", "america", "canada", "domestic")) return "North America";
+  return "Other";
+}
 
 function isCategorical(header: string, values: string[]): boolean {
   if (SKIP_HEADER.test(header) || NOTES_HEADER.test(header)) return false;
@@ -86,7 +127,8 @@ async function extractFromNotes(
     system:
       "You read short notes about an investor/firm and extract structured facts. For each item return: " +
       `firmType (one of: ${FIRM_TYPES.join(", ")}), ` +
-      `checkSize (one of: ${CHECK_SIZES.join(", ")}), and region (a short place like 'US Northeast', 'US West', 'Europe', 'Global', or 'Unknown'). ` +
+      "checkSize (their typical check size exactly as stated, e.g. '$1-5M', '$250k', '$25M', or 'Unknown'), " +
+      "and region (their geographic focus as stated, e.g. 'US Northeast', 'Europe', 'LATAM', 'Global'). " +
       "Infer only from the text; use 'Other'/'Unknown' when not stated. " +
       'Return ONLY JSON {"items":[{"id":"<id>","firmType":"...","checkSize":"...","region":"..."}]}.',
     messages: [
@@ -171,6 +213,11 @@ export async function runNormalize(): Promise<void> {
       for (let i = 0; i < batches.length; i += CONCURRENCY) {
         const results = await Promise.all(batches.slice(i, i + CONCURRENCY).map((b) => extractFromNotes(b)));
         for (const res of results) Object.assign(derived, res);
+      }
+      // Collapse check size + region into fixed buckets so the facets stay clean.
+      for (const v of Object.values(derived)) {
+        if (v.checkSize) v.checkSize = bandCheckSize(v.checkSize);
+        if (v.region) v.region = regionBucket(v.region);
       }
       const firmCats = new Set<string>();
       const sizeCats = new Set<string>();
