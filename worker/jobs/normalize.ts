@@ -119,6 +119,16 @@ async function clusterValues(header: string, distinct: string[]): Promise<Record
 }
 
 const STAGE_ORDER = ["Pre-Seed", "Seed", "Series A", "Series B", "Series C", "Growth / Late"];
+const STAGE_HEADER = /\b(round|rounds|stage|stages)\b/i;
+
+/** A non-tag column whose values are mostly investment stages (e.g. a "Round" column). */
+function looksStageHeavy(distinct: string[]): boolean {
+  if (!distinct.length) return false;
+  let hits = 0;
+  for (const v of distinct)
+    if (/(pre-?seed|seed|series\s*[a-e]|growth|early[- ]stage|late[r]?[- ]stage)/i.test(v)) hits++;
+  return hits / distinct.length >= 0.5;
+}
 
 /** Classify interest tags into ONE broad sector bucket + the investment stages they cover (ranges expanded). */
 async function classifyTags(
@@ -214,34 +224,54 @@ export async function runNormalize(): Promise<void> {
     const groupings: Record<string, { label: string; categories: string[]; multi?: boolean }> = {};
     const singleMap: Record<string, Record<string, string>> = {};
     const tagClass: Record<string, Record<string, { sector: string | null; stages: string[] }>> = {};
+    // Stage data can live in a tag column (Interests) AND in a dedicated column (e.g. "Round").
+    // Fold all of it into ONE range-expanded "Stage" facet instead of separate granular facets.
+    const stageColMap: Record<string, Record<string, string[]>> = {};
+    const stageCats = new Set<string>();
+
+    const classifyBatched = async (vals: string[]) => {
+      const cls: Record<string, { sector: string | null; stages: string[] }> = {};
+      const batches = await Promise.all(
+        Array.from({ length: Math.ceil(vals.length / 40) }, (_, i) => classifyTags(vals.slice(i * 40, i * 40 + 40))),
+      );
+      for (const b of batches) Object.assign(cls, b);
+      return cls;
+    };
 
     let used = 0;
     for (const [header, values] of byCol) {
       if (used >= MAX_COLUMNS) break;
-      if (isTagColumn(header, values)) {
+      const distinct = [...new Set(values)];
+      const tagCol = isTagColumn(header, values);
+      // A dedicated stage/round column: expand each value to STAGE_ORDER members; no granular facet of its own.
+      if (!tagCol && (STAGE_HEADER.test(header) || looksStageHeavy(distinct))) {
+        const cls = await classifyBatched(distinct.slice(0, MAX_DISTINCT));
+        const m: Record<string, string[]> = {};
+        for (const [k, v] of Object.entries(cls)) {
+          if (v.stages.length) m[k] = v.stages;
+          for (const s of v.stages) stageCats.add(s);
+        }
+        if (Object.keys(m).length) {
+          stageColMap[header] = m;
+          used++;
+        }
+        continue;
+      }
+      if (tagCol) {
         const tags = [...new Set(values.flatMap(splitTags))].slice(0, MAX_DISTINCT);
-        // Batch so a long tag list can't overflow the model's output and truncate the JSON.
-        const cls: Record<string, { sector: string | null; stages: string[] }> = {};
-        const batches = await Promise.all(
-          Array.from({ length: Math.ceil(tags.length / 40) }, (_, i) => classifyTags(tags.slice(i * 40, i * 40 + 40))),
-        );
-        for (const b of batches) Object.assign(cls, b);
+        const cls = await classifyBatched(tags);
         if (Object.keys(cls).length) {
           tagClass[header] = cls;
-          // The tag column becomes a broad-sector facet; investment stages spin off into their own facet.
+          // The tag column becomes a broad-sector facet; investment stages spin off into the Stage facet.
           const sectors = [
             ...new Set(Object.values(cls).map((v) => v.sector).filter((s): s is string => !!s)),
           ].sort();
-          const stages = new Set<string>();
-          for (const v of Object.values(cls)) for (const s of v.stages) stages.add(s);
+          for (const v of Object.values(cls)) for (const s of v.stages) stageCats.add(s);
           if (sectors.length) groupings[header] = { label: header, categories: sectors, multi: true };
-          if (stages.size)
-            groupings["Stage"] = { label: "Stage", categories: STAGE_ORDER.filter((s) => stages.has(s)), multi: true };
           used++;
         }
       } else if (isCategorical(header, values)) {
-        const distinct = [...new Set(values)].slice(0, MAX_DISTINCT);
-        const map = await clusterValues(header, distinct);
+        const map = await clusterValues(header, distinct.slice(0, MAX_DISTINCT));
         if (Object.keys(map).length) {
           singleMap[header] = map;
           groupings[header] = { label: header, categories: [...new Set(Object.values(map))].sort() };
@@ -249,6 +279,8 @@ export async function runNormalize(): Promise<void> {
         }
       }
     }
+    if (stageCats.size)
+      groupings["Stage"] = { label: "Stage", categories: STAGE_ORDER.filter((s) => stageCats.has(s)), multi: true };
 
     // Derived facets from notes.
     const derived: Record<string, { firmType?: string; checkSize?: string; region?: string }> = {};
@@ -296,12 +328,12 @@ export async function runNormalize(): Promise<void> {
         const c = singleMap[header][(cf[header] ?? "").toLowerCase().trim()];
         if (c) norm[header] = c;
       }
+      const stages = new Set<string>();
       for (const header of Object.keys(tagClass)) {
         const raw = cf[header];
         if (!raw) continue;
         const cls = tagClass[header];
         const sectors = new Set<string>();
-        const stages = new Set<string>();
         for (const t of splitTags(raw)) {
           const c = cls[t.toLowerCase().trim()];
           if (!c) continue;
@@ -309,9 +341,14 @@ export async function runNormalize(): Promise<void> {
           for (const s of c.stages) stages.add(s);
         }
         if (sectors.size) norm[header] = [...sectors].sort().join(" | ");
-        // Stage stored range-expanded, so a "Seed" filter matches "Seed to Series B" contacts.
-        if (stages.size) norm["Stage"] = STAGE_ORDER.filter((s) => stages.has(s)).join(" | ");
       }
+      for (const header of Object.keys(stageColMap)) {
+        const raw = cf[header];
+        if (!raw) continue;
+        for (const s of stageColMap[header][raw.toLowerCase().trim()] ?? []) stages.add(s);
+      }
+      // One range-expanded Stage value, so a "Seed" filter also matches "Seed to Series B" contacts.
+      if (stages.size) norm["Stage"] = STAGE_ORDER.filter((s) => stages.has(s)).join(" | ");
       const d = derived[r.id];
       if (d?.firmType) norm["Firm Type"] = d.firmType;
       if (d?.checkSize) norm["Check Size"] = d.checkSize;
