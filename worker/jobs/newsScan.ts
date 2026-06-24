@@ -18,7 +18,7 @@ import { resolveChannel } from "@/lib/outreach/deliver";
 import { webNewsPass, xNewsPass } from "./enrichment";
 import { runSuggestions } from "./suggestions";
 
-const NEWS_SCAN_WINDOW_DAYS = 3; // intraday scan only cares about the last few days
+const NEWS_SCAN_WINDOW_DAYS = 7; // look back a week so genuine news isn't missed between scans
 const NEWS_SCAN_TOP_N = 10; // keep cost bounded: only your most important relationships
 const BREAKING_DAILY_CAP = 2; // a breaking ping must be rare to stay worth opening
 const BREAKING_MIN_SCORE = 0.62;
