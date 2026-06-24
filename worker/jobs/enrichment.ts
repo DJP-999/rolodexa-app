@@ -282,75 +282,80 @@ async function syncLinkedInMessages(
 ): Promise<void> {
   const chats = await getChats(liId);
   if (!chats.length) return;
-  // Attribute a chat to a contact by the attendee's provider-id (matched relations)
-  // OR by the attendee's NAME (against ALL contacts) — so messages with people who
-  // weren't matched to a 1st-degree relation still land on the right contact.
   const nameMap = new Map<string, string>();
   for (const c of contactsList) {
     const nk = nameKey(c.name);
     if (nk) nameMap.set(nk, c.id);
   }
-  let n = 0;
-  let attLookups = 0;
-  for (const chat of chats.slice(0, 250)) {
+
+  // Phase 1: resolve each chat to a contact by the attendee's provider-id.
+  const resolved = new Map<string, string>(); // chatId -> contactId
+  const unresolved: any[] = [];
+  for (const chat of chats) {
     if (!chat?.id) continue;
-    let contactId: string | undefined;
     const pid = chat.attendee_provider_id ? String(chat.attendee_provider_id) : null;
-    if (pid) contactId = providerToContact.get(pid);
-    if (!contactId) {
-      const nm =
-        typeof chat.attendee_name === "string"
-          ? chat.attendee_name
-          : typeof chat.name === "string"
-            ? chat.name
-            : null;
-      if (nm) contactId = nameMap.get(nameKey(nm));
-    }
-    // Last resort: fetch the chat's attendees and match by provider-id or name.
-    if (!contactId && attLookups < 200) {
-      attLookups++;
-      const atts = await getChatAttendees(String(chat.id));
-      for (const a of atts) {
-        const apid = a?.provider_id ?? a?.attendee_provider_id ?? null;
-        if (apid && providerToContact.get(String(apid))) {
-          contactId = providerToContact.get(String(apid));
+    const cid = pid ? providerToContact.get(pid) : undefined;
+    if (cid) resolved.set(String(chat.id), cid);
+    else unresolved.push(chat);
+  }
+
+  // Phase 2: for the rest, look up attendees (parallel) and match by provider-id or NAME.
+  for (let i = 0; i < unresolved.length; i += 10) {
+    const slice = unresolved.slice(i, i + 10);
+    const lists = await Promise.all(slice.map((c) => getChatAttendees(String(c.id))));
+    slice.forEach((chat, j) => {
+      for (const a of lists[j] ?? []) {
+        if (a?.is_self) continue;
+        const apid = a?.provider_id ? String(a.provider_id) : null;
+        const byId = apid ? providerToContact.get(apid) : undefined;
+        if (byId) {
+          resolved.set(String(chat.id), byId);
           break;
         }
         const anm =
           typeof a?.name === "string" ? a.name : typeof a?.display_name === "string" ? a.display_name : null;
-        if (anm) {
-          const hit = nameMap.get(nameKey(anm));
-          if (hit) {
-            contactId = hit;
-            break;
-          }
+        const byName = anm ? nameMap.get(nameKey(anm)) : undefined;
+        if (byName) {
+          resolved.set(String(chat.id), byName);
+          break;
         }
       }
-    }
-    if (!contactId) continue;
-    const msgs = await getChatMessages(String(chat.id));
-    for (const m of msgs.slice(0, 25)) {
-      if (!m?.id || !m?.timestamp) continue;
-      const when = new Date(m.timestamp);
-      if (isNaN(when.getTime())) continue;
-      await db
-        .insert(interactions)
-        .values({
-          userId,
-          contactId,
-          eventType: m.is_sender ? "message_out" : "message_in",
-          direction: m.is_sender ? "outbound" : "inbound",
-          channel: "linkedin",
-          threadId: String(chat.id),
-          occurredAt: when,
-          sourceRef: String(m.id),
-          metadata: { text: typeof m.text === "string" ? m.text.slice(0, 200) : null },
-        })
-        .onConflictDoNothing();
-    }
-    n++;
+    });
   }
-  console.log(`[enrichment] LinkedIn messages synced across ${n} chats (${attLookups} attendee lookups)`);
+
+  // Phase 3: fetch messages (parallel) for resolved chats and log them.
+  const entries = [...resolved.entries()];
+  let n = 0;
+  for (let i = 0; i < entries.length; i += 10) {
+    const slice = entries.slice(i, i + 10);
+    const msgLists = await Promise.all(slice.map(([chatId]) => getChatMessages(chatId)));
+    for (let j = 0; j < slice.length; j++) {
+      const [chatId, contactId] = slice[j];
+      for (const m of (msgLists[j] ?? []).slice(0, 25)) {
+        if (!m?.id || !m?.timestamp) continue;
+        const when = new Date(m.timestamp);
+        if (isNaN(when.getTime())) continue;
+        await db
+          .insert(interactions)
+          .values({
+            userId,
+            contactId,
+            eventType: m.is_sender ? "message_out" : "message_in",
+            direction: m.is_sender ? "outbound" : "inbound",
+            channel: "linkedin",
+            threadId: chatId,
+            occurredAt: when,
+            sourceRef: String(m.id),
+            metadata: { text: typeof m.text === "string" ? m.text.slice(0, 200) : null },
+          })
+          .onConflictDoNothing();
+      }
+      n++;
+    }
+  }
+  console.log(
+    `[enrichment] LinkedIn: ${chats.length} chats, ${resolved.size} attributed (${unresolved.length} name lookups)`,
+  );
 }
 
 /** Best-effort plain-text snippet of an email body, stripped of HTML and quoted replies. */
