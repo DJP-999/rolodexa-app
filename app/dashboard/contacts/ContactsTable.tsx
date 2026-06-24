@@ -130,7 +130,18 @@ export function ContactsTable({
   useEffect(() => {
     try {
       const v = localStorage.getItem(STORAGE_KEY);
-      if (v) setVisible(JSON.parse(v));
+      if (v) {
+        let vis: string[] = JSON.parse(v);
+        // One-time migration: surface the new Fit column for users whose saved layout
+        // predates it (without re-adding it if they later choose to hide it).
+        if (Array.isArray(vis) && !vis.includes("fit") && !localStorage.getItem("rolodexa.contactCols.fitMig")) {
+          const i = vis.indexOf("relevance");
+          vis = i >= 0 ? [...vis.slice(0, i), "fit", ...vis.slice(i)] : [...vis, "fit"];
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(vis));
+          localStorage.setItem("rolodexa.contactCols.fitMig", "1");
+        }
+        setVisible(vis);
+      }
       const o = localStorage.getItem(ORDER_KEY);
       if (o) setOrder(JSON.parse(o));
       const s = localStorage.getItem(SORT_KEY);
