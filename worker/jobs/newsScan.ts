@@ -53,17 +53,10 @@ export async function runNewsScan(): Promise<void> {
     byUser.set(c.userId, l);
   }
 
-  // 1) Gather fresh signals for each user's top contacts.
+  // 1) Gather fresh signals for each user's top contacts. Claims are idempotent
+  // (stable ids) and validated at creation, so we re-derive without wiping — that keeps
+  // every suggestion's cited source intact instead of orphaning it on each scan.
   for (const [, list] of byUser) {
-    // Clear ALL prior web-news claims for this user's contacts first — including
-    // lower-ranked ones the re-derive below won't reach — so stale or mis-attributed
-    // items (e.g. a "Multipli" article wrongly tied to "Multiplicity Partners") never linger.
-    const ids = list.map((c) => c.id);
-    for (let i = 0; i < ids.length; i += 200) {
-      await db
-        .delete(claims)
-        .where(and(inArray(claims.contactId, ids.slice(i, i + 200)), eq(claims.field, "news")));
-    }
     const top = list
       .filter((c) => !c.isOrganization && ((c.relevance ?? 0) >= 60 || c.highValue))
       .sort((a, b) => (b.relevance ?? 0) - (a.relevance ?? 0))

@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { claims, contacts, suggestions, userContext } from "@/db/schema";
 import { cadenceForRelevance } from "@/lib/scoring/relevance";
@@ -87,6 +87,26 @@ export async function runSuggestions(): Promise<void> {
   const all = await db.select().from(contacts);
   const ctxCache = new Map<string, { focus: string | null; style: string | null }>();
   let created = 0;
+
+  // Heal: a milestone suggestion must point to a live, sourced claim. Dismiss any whose
+  // claims no longer exist (e.g. orphaned by an earlier purge) so we never show a "Why now"
+  // with no source; the loop below re-creates a properly-linked one if the news is still fresh.
+  const pendingMilestones = await db
+    .select({ id: suggestions.id, claimIds: suggestions.claimIds })
+    .from(suggestions)
+    .where(and(eq(suggestions.status, "pending"), eq(suggestions.triggerType, "milestone")));
+  for (const s of pendingMilestones) {
+    const ids = s.claimIds ?? [];
+    const live = ids.length
+      ? (await db.select({ id: claims.id }).from(claims).where(inArray(claims.id, ids))).length
+      : 0;
+    if (live === 0) {
+      await db
+        .update(suggestions)
+        .set({ status: "dismissed", updatedAt: new Date() })
+        .where(eq(suggestions.id, s.id));
+    }
+  }
 
   for (const c of all) {
     if (c.isOrganization) continue;

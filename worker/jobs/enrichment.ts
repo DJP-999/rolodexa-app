@@ -585,10 +585,6 @@ export async function webNewsPass(glist: Contact[], windowDays: number, limit = 
   const startDate = new Date(Date.now() - windowDays * 86_400_000).toISOString().slice(0, 10);
   const priority = selectPriority(glist, limit);
   for (const c of priority) {
-    // Refresh, don't accumulate: clear this contact's prior web-news claims, then
-    // re-derive below. Anything mis-attributed earlier (e.g. an article wrongly tied to
-    // the firm) is purged and only comes back if it passes the strict guard this run.
-    await db.delete(claims).where(and(eq(claims.contactId, c.id), eq(claims.field, "news")));
     // Quote the firm so Exa weights the exact phrase, not a shared first word.
     const firmQ = c.company ? `"${c.company}" ` : "";
     const results = await search({

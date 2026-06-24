@@ -1,8 +1,14 @@
+import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { claims, type Claim } from "@/db/schema";
 import { env } from "@/lib/env";
 
-/** The single writer for enrichment facts. No claim is stored without a source. */
+/**
+ * The single writer for enrichment facts. No claim is stored without a source.
+ * Idempotent on (contactId, field, sourceUrl): re-deriving the same item updates it
+ * in place and keeps the SAME row id, so suggestions that cite a claim never get
+ * orphaned by a re-scan (and we don't accumulate duplicate rows).
+ */
 export async function writeClaim(input: {
   contactId: string;
   field: string;
@@ -14,6 +20,31 @@ export async function writeClaim(input: {
 }): Promise<void> {
   if (!input.sourceUrl) {
     console.warn(`[claims] dropped unsourced claim for ${input.contactId}: ${input.field}`);
+    return;
+  }
+  const existing = (
+    await db
+      .select({ id: claims.id })
+      .from(claims)
+      .where(
+        and(
+          eq(claims.contactId, input.contactId),
+          eq(claims.field, input.field),
+          eq(claims.sourceUrl, input.sourceUrl),
+        ),
+      )
+      .limit(1)
+  )[0];
+  if (existing) {
+    await db
+      .update(claims)
+      .set({
+        value: input.value,
+        eventDate: input.eventDate ?? null,
+        publishedDate: input.publishedDate ?? null,
+        confidence: input.confidence ?? 0.6,
+      })
+      .where(eq(claims.id, existing.id));
     return;
   }
   await db.insert(claims).values({
