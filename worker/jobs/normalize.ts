@@ -164,8 +164,13 @@ export async function runNormalize(): Promise<void> {
       const withNotes = rows
         .map((r) => ({ id: r.id, notes: ((r.customFields ?? {}) as Record<string, string>)[notesHeader!] ?? "" }))
         .filter((x) => x.notes && x.notes.length > 40);
-      for (let i = 0; i < withNotes.length; i += NOTES_BATCH) {
-        Object.assign(derived, await extractFromNotes(withNotes.slice(i, i + NOTES_BATCH)));
+      const batches: { id: string; notes: string }[][] = [];
+      for (let i = 0; i < withNotes.length; i += NOTES_BATCH) batches.push(withNotes.slice(i, i + NOTES_BATCH));
+      // Run batches concurrently so ~1,000 notes take ~1 minute, not ten.
+      const CONCURRENCY = 10;
+      for (let i = 0; i < batches.length; i += CONCURRENCY) {
+        const results = await Promise.all(batches.slice(i, i + CONCURRENCY).map((b) => extractFromNotes(b)));
+        for (const res of results) Object.assign(derived, res);
       }
       const firmCats = new Set<string>();
       const sizeCats = new Set<string>();
