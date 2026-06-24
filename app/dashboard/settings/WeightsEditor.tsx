@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { saveWeights } from "./actions";
+import { SaveButton } from "./SaveButton";
 
 const FIELDS: [string, string, string][] = [
   ["professional", "Professional Relevance", "How well a contact's field matches your active projects"],
@@ -69,9 +70,7 @@ export function WeightsEditor({ initial }: { initial: Record<string, number> }) 
       </div>
 
       <div className="flex justify-end">
-        <button className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:bg-black/90">
-          Save weights
-        </button>
+        <SaveButton>Save weights</SaveButton>
       </div>
     </form>
   );

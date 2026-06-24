@@ -18,6 +18,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     location: c.location,
     relationship: c.relationship,
     relevance: c.relevance,
+    fit: c.professionalFit ?? null,
+    rationale: c.gradeRationale ?? null,
     lastContactedAt: c.lastContactedAt,
     bio,
     stats,

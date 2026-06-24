@@ -7,6 +7,7 @@ import { listAccounts } from "@/lib/integrations/unipile";
 import { saveContextAction, useAccount, disconnectAccount, connectNewAccount } from "./actions";
 import { WeightsEditor } from "./WeightsEditor";
 import { JobsGrid, type Job } from "./JobsGrid";
+import { SaveButton } from "./SaveButton";
 import { TelegramControls } from "./TelegramControls";
 import { DangerZone } from "./DangerZone";
 
@@ -270,10 +271,9 @@ export default async function SettingsPage() {
             </select>
             <span className="mt-1 block text-xs text-muted">Morning brief and notifications use this timezone.</span>
           </label>
-          <div className="flex justify-end">
-            <button className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:bg-black/90">
-              Save context
-            </button>
+          <div className="flex items-center justify-end gap-3">
+            <span className="text-xs text-muted">Saving re-grades your whole network on your new context.</span>
+            <SaveButton>Save context</SaveButton>
           </div>
         </form>
       </Section>

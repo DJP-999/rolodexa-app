@@ -127,6 +127,7 @@ export default async function ContactsPage({
     location: c.location,
     relationship: c.relationship,
     relevance: c.relevance,
+    professionalFit: c.professionalFit ?? null,
     status: c.status,
     highValue: c.highValue,
     lastDays: days(c.lastContactedAt),

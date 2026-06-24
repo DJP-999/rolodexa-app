@@ -70,7 +70,9 @@ export async function saveContextAction(formData: FormData) {
     await db.insert(userContext).values({ userId: user.id, ...values, ...styleFields });
   }
 
-  await runOnce("recompute");
+  // Context drives domain-fit; re-grade fit (which re-runs relevance) in the background
+  // so the whole network re-ranks against the new focus. Non-blocking so Save returns fast.
+  await enqueue("fit-grade");
   revalidatePath("/dashboard/settings");
   revalidatePath("/dashboard");
   revalidatePath("/dashboard/contacts");

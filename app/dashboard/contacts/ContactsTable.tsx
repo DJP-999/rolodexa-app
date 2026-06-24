@@ -13,6 +13,7 @@ export type Row = {
   location: string | null;
   relationship: string | null;
   relevance: number | null;
+  professionalFit: number | null;
   status: string | null;
   highValue: boolean | null;
   lastDays: string;
@@ -27,10 +28,11 @@ const CORE: { key: string; label: string }[] = [
   { key: "industry", label: "Industry" },
   { key: "location", label: "Location" },
   { key: "relationship", label: "Relationship" },
+  { key: "fit", label: "Fit" },
   { key: "relevance", label: "Relevance" },
   { key: "days", label: "Days" },
 ];
-const DEFAULT_VISIBLE = ["company", "industry", "location", "relationship", "relevance", "days"];
+const DEFAULT_VISIBLE = ["company", "industry", "relationship", "fit", "relevance", "days"];
 const STORAGE_KEY = "rolodexa.contactCols";
 const ORDER_KEY = "rolodexa.contactOrder";
 const SORT_KEY = "rolodexa.contactSort";
@@ -63,6 +65,14 @@ function Summary({ d, id }: { d: any; id: string }) {
   return (
     <div className="space-y-3 text-sm">
       {d.bio && <p className="text-ink">{d.bio}</p>}
+      {d.fit != null && (
+        <div className="rounded-xl border border-hairline bg-black/[0.02] p-3">
+          <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted">
+            Why this rank · {Math.round(d.fit * 100)}% fit
+          </div>
+          {d.rationale && <p className="mt-1 text-ink/80">{d.rationale}</p>}
+        </div>
+      )}
       <div className="grid grid-cols-1 gap-x-8 gap-y-1.5 sm:grid-cols-2">
         <div>
           <span className="text-muted">Firm: </span>
@@ -200,6 +210,8 @@ export function ContactsTable({
         return (r.relationship ?? "").toLowerCase();
       case "relevance":
         return r.relevance ?? -1;
+      case "fit":
+        return r.professionalFit ?? -1;
       case "days": {
         const n = parseInt(r.lastDays, 10);
         return isNaN(n) ? Number.MAX_SAFE_INTEGER : n;
@@ -275,6 +287,20 @@ export function ContactsTable({
             <span className="text-[13px] font-medium text-ink">{r.relevance ?? "—"}</span>
           </div>
         );
+      case "fit": {
+        if (r.professionalFit == null) return <span className="text-muted">—</span>;
+        const pct = Math.round(r.professionalFit * 100);
+        const color = pct >= 85 ? "#16a34a" : pct >= 70 ? "#22c55e" : pct >= 55 ? "#f59e0b" : "#9ca3af";
+        return (
+          <span
+            className="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold"
+            style={{ backgroundColor: `${color}1a`, color }}
+            title="LLM domain/thesis fit to your focus"
+          >
+            {pct}
+          </span>
+        );
+      }
       case "days":
         return <span className="text-[13px] font-medium text-emerald-600">{r.lastDays}</span>;
       default:
