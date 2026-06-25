@@ -1,11 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 export type PBRow = { id: string; name: string; fields: Record<string, string> };
-export type PBFacet = { key: string; label: string; values: string[]; multi?: boolean };
+export type PBFacet = { param: string; label: string; values: string[]; selected: string };
 
-// Column key -> header label, in display order (Firm name is rendered separately, first).
 const COLUMNS: [string, string][] = [
   ["Firm Type", "Firm Type"],
   ["HQ Location", "HQ Location"],
@@ -28,41 +28,40 @@ const COLUMNS: [string, string][] = [
   ["Description", "Description"],
 ];
 const WIDE = new Set(["Preferred Industry", "Preferred Verticals", "Preferred Investment Types", "Description"]);
+const CAP = 300;
 
-export function PitchbookTable({ rows, facets }: { rows: PBRow[]; facets: PBFacet[] }) {
-  const [q, setQ] = useState("");
-  const [sel, setSel] = useState<Record<string, string>>({});
+export function PitchbookTable({ rows, facets, q, total }: { rows: PBRow[]; facets: PBFacet[]; q: string; total: number }) {
+  const router = useRouter();
+  const params = useSearchParams();
+  const pathname = usePathname();
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
+  const [pending, setPending] = useState(false);
 
-  const filtered = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    let out = rows.filter((r) => {
-      if (needle) {
-        const hay = `${r.name} ${Object.values(r.fields).join(" ")}`.toLowerCase();
-        if (!hay.includes(needle)) return false;
-      }
-      return facets.every((f) => {
-        const s = sel[f.key];
-        if (!s) return true;
-        const v = r.fields[f.key] ?? "";
-        return f.multi ? v.split(/[,;]\s*/).map((x) => x.trim()).includes(s) : v === s;
-      });
-    });
-    if (sort) {
-      const { key, dir } = sort;
-      out = [...out].sort((a, b) => {
-        const av = key === "name" ? a.name : a.fields[key] ?? "";
-        const bv = key === "name" ? b.name : b.fields[key] ?? "";
-        const num = parseFloat(av.replace(/[^0-9.]/g, "")) - parseFloat(bv.replace(/[^0-9.]/g, ""));
-        const c = !isNaN(num) && av && bv && /[0-9]/.test(av) && /[0-9]/.test(bv) ? num : av.localeCompare(bv);
-        return dir === "asc" ? c : -c;
-      });
-    }
-    return out;
-  }, [rows, facets, q, sel, sort]);
+  const setParam = (k: string, v: string) => {
+    const p = new URLSearchParams(params.toString());
+    if (v) p.set(k, v);
+    else p.delete(k);
+    setPending(true);
+    router.push(p.toString() ? `${pathname}?${p}` : pathname);
+  };
+  const onSearch = (v: string) => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setParam("q", v.trim()), 350);
+  };
 
   const toggleSort = (key: string) =>
     setSort((s) => (!s || s.key !== key ? { key, dir: "asc" } : s.dir === "asc" ? { key, dir: "desc" } : null));
+
+  const sorted = sort
+    ? [...rows].sort((a, b) => {
+        const av = sort.key === "name" ? a.name : a.fields[sort.key] ?? "";
+        const bv = sort.key === "name" ? b.name : b.fields[sort.key] ?? "";
+        const num = parseFloat(av.replace(/[^0-9.]/g, "")) - parseFloat(bv.replace(/[^0-9.]/g, ""));
+        const c = !isNaN(num) && /[0-9]/.test(av) && /[0-9]/.test(bv) ? num : av.localeCompare(bv);
+        return sort.dir === "asc" ? c : -c;
+      })
+    : rows;
 
   const cell = (r: PBRow, key: string) => {
     const v = r.fields[key];
@@ -82,16 +81,16 @@ export function PitchbookTable({ rows, facets }: { rows: PBRow[]; facets: PBFace
     <div>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Search firms, locations, industries, contacts…"
-          className="w-72 rounded-lg border border-hairline bg-white px-3 py-1.5 text-sm"
+          defaultValue={q}
+          onChange={(e) => onSearch(e.target.value)}
+          placeholder="Search all firms — name, location, industry, contact…"
+          className="w-80 rounded-lg border border-hairline bg-white px-3 py-1.5 text-sm"
         />
         {facets.map((f) => (
           <select
-            key={f.key}
-            value={sel[f.key] ?? ""}
-            onChange={(e) => setSel((s) => ({ ...s, [f.key]: e.target.value }))}
+            key={f.param}
+            value={f.selected}
+            onChange={(e) => setParam(f.param, e.target.value)}
             className="rounded-lg border border-hairline bg-white px-2.5 py-1.5 text-xs text-ink"
           >
             <option value="">{f.label}: All</option>
@@ -102,7 +101,9 @@ export function PitchbookTable({ rows, facets }: { rows: PBRow[]; facets: PBFace
             ))}
           </select>
         ))}
-        <span className="text-xs text-muted">{filtered.length} shown</span>
+        <span className="text-xs text-muted">
+          {pending ? "searching…" : `${rows.length}${rows.length >= CAP ? "+" : ""} of ${total.toLocaleString()} match`}
+        </span>
       </div>
 
       <div className="overflow-x-auto rounded-2xl border border-hairline bg-white">
@@ -128,7 +129,7 @@ export function PitchbookTable({ rows, facets }: { rows: PBRow[]; facets: PBFace
             </tr>
           </thead>
           <tbody>
-            {filtered.slice(0, 600).map((r) => (
+            {sorted.map((r) => (
               <tr key={r.id} className="border-b border-hairline/70 align-top">
                 <td className="sticky left-0 z-10 bg-white px-3 py-3 text-sm font-medium text-ink">{r.name}</td>
                 {COLUMNS.map(([key]) => (
@@ -144,6 +145,11 @@ export function PitchbookTable({ rows, facets }: { rows: PBRow[]; facets: PBFace
           </tbody>
         </table>
       </div>
+      {rows.length >= CAP && (
+        <p className="mt-2 text-xs text-muted">
+          Showing the first {CAP} matches — narrow with search or a filter to see more specific results.
+        </p>
+      )}
     </div>
   );
 }
