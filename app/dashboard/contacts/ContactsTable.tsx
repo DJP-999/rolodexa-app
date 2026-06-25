@@ -68,6 +68,12 @@ function fmt(iso: string | null): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
+/** Parse a date-like string (e.g. "6/16/2026", "2026-06-16") to a timestamp, else null. */
+function parseMaybeDate(s: string): number | null {
+  if (!s || !/\d{1,4}[/.\-]\d{1,2}([/.\-]\d{1,4})?/.test(s)) return null;
+  const t = Date.parse(s);
+  return isNaN(t) ? null : t;
+}
 
 function Summary({ d, id }: { d: any; id: string }) {
   const s = d.stats ?? {};
@@ -353,10 +359,16 @@ export function ContactsTable({
     ? [...filtered].sort((a, b) => {
         const av = sortVal(a, sort.key);
         const bv = sortVal(b, sort.key);
-        const c =
-          typeof av === "number" && typeof bv === "number"
-            ? av - bv
-            : String(av).localeCompare(String(bv));
+        let c: number;
+        if (typeof av === "number" && typeof bv === "number") {
+          c = av - bv;
+        } else {
+          // Date-like string columns (e.g. "Date added" = 6/16/2026) must sort chronologically,
+          // not lexically — otherwise 6/16 sorts before 6/2.
+          const ad = parseMaybeDate(String(av));
+          const bd = parseMaybeDate(String(bv));
+          c = ad !== null || bd !== null ? (ad ?? -Infinity) - (bd ?? -Infinity) : String(av).localeCompare(String(bv));
+        }
         return sort.dir === "asc" ? c : -c;
       })
     : filtered;

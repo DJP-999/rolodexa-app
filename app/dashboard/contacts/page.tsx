@@ -14,8 +14,11 @@ async function getContacts() {
     return await db
       .select()
       .from(contacts)
-      .orderBy(sql`${contacts.highValue} desc nulls last, ${contacts.relevance} desc nulls last`)
-      .limit(500);
+      // createdAt desc tiebreak so brand-new contacts (null relevance) never sort off the end.
+      .orderBy(
+        sql`${contacts.highValue} desc nulls last, ${contacts.relevance} desc nulls last, ${contacts.createdAt} desc`,
+      )
+      .limit(5000);
   } catch {
     return null;
   }
