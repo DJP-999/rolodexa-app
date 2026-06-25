@@ -1,6 +1,6 @@
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { calendarEvents, coldProspects, contacts, interactions, users } from "@/db/schema";
+import { calendarEvents, coldProspects, connectedAccounts, contacts, interactions, users } from "@/db/schema";
 
 /** The user's own address(es): their login email + every connected mailbox/calendar
  *  address. Used to tell inbound from outbound and to never treat the user as the
