@@ -2,8 +2,8 @@
 
 import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ChevronLeft, ChevronRight, X, MapPin, Check, Ban } from "lucide-react";
-import { saveMeetingNotes, setMeetingOutcome } from "./actions";
+import { ChevronLeft, ChevronRight, X, MapPin, Check, Ban, Send, Loader2 } from "lucide-react";
+import { saveMeetingNotes, setMeetingOutcome, draftReschedule, sendReschedule } from "./actions";
 
 export type EventVM = {
   id: string;
@@ -75,6 +75,9 @@ export function CalendarWeek({ events }: { events: EventVM[] }) {
   const [selId, setSelId] = useState<string | null>(null);
   const [heldOv, setHeldOv] = useState<Record<string, boolean>>({});
   const [notesOv, setNotesOv] = useState<Record<string, string>>({});
+  const [draft, setDraft] = useState<
+    { id: string; to: string; name: string; body: string; status: "loading" | "ready" | "sending" | "sent" | "error"; error?: string } | null
+  >(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const days = useMemo(() => weekDays(offset), [offset]);
@@ -114,6 +117,25 @@ export function CalendarWeek({ events }: { events: EventVM[] }) {
   async function onHeld(e: EventVM, held: boolean) {
     setHeldOv((s) => ({ ...s, [e.id]: held }));
     await setMeetingOutcome(e.id, held);
+    if (held) {
+      setDraft(null);
+      return;
+    }
+    // No-show → draft a casual reschedule note for one-click send.
+    setDraft({ id: e.id, to: "", name: "", body: "", status: "loading" });
+    const r = await draftReschedule(e.id);
+    setDraft(
+      r.ok
+        ? { id: e.id, to: r.to ?? "", name: r.name ?? "", body: r.body ?? "", status: "ready" }
+        : { id: e.id, to: "", name: "", body: "", status: "error", error: r.error },
+    );
+  }
+
+  async function sendDraft() {
+    if (!draft) return;
+    setDraft({ ...draft, status: "sending" });
+    const r = await sendReschedule(draft.id, draft.body);
+    setDraft((d) => (d ? { ...d, status: r.ok ? "sent" : "error", error: r.error } : d));
   }
   function onNotes(e: EventVM, v: string) {
     setNotesOv((s) => ({ ...s, [e.id]: v }));
@@ -313,6 +335,46 @@ export function CalendarWeek({ events }: { events: EventVM[] }) {
             </div>
           ) : (
             <p className="mt-4 text-xs text-muted">Confirmation opens once the meeting starts.</p>
+          )}
+
+          {/* No-show → casual reschedule draft, one-click send */}
+          {heldOf(sel) === false && draft?.id === sel.id && (
+            <div className="mt-3 rounded-xl border border-hairline bg-black/[0.015] p-3">
+              <div className="text-xs font-medium text-ink">
+                Reschedule note{draft.name ? ` to ${draft.name.split(/\s+/)[0]}` : ""}
+              </div>
+              {draft.status === "loading" ? (
+                <p className="mt-2 flex items-center gap-2 text-xs text-muted">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Drafting…
+                </p>
+              ) : draft.status === "error" ? (
+                <p className="mt-2 text-xs text-rose-600">{draft.error || "Couldn't draft a reschedule."}</p>
+              ) : draft.status === "sent" ? (
+                <p className="mt-2 flex items-center gap-1.5 text-xs text-emerald-600">
+                  <Check className="h-3.5 w-3.5" /> Sent to {draft.to}
+                </p>
+              ) : (
+                <>
+                  <textarea
+                    value={draft.body}
+                    onChange={(e) => setDraft((d) => (d ? { ...d, body: e.target.value } : d))}
+                    rows={5}
+                    className="mt-1.5 w-full resize-y rounded-lg border border-hairline bg-white px-3 py-2 text-sm outline-none focus:border-black/30"
+                  />
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <span className="min-w-0 truncate text-[11px] text-muted">To: {draft.to}</span>
+                    <button
+                      onClick={sendDraft}
+                      disabled={draft.status === "sending"}
+                      className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-black px-3 py-1.5 text-sm font-medium text-white hover:bg-black/90 disabled:opacity-60"
+                    >
+                      {draft.status === "sending" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />} Send
+                    </button>
+                  </div>
+                  <p className="mt-1 text-[11px] text-muted">Edit if you like, then one-click send.</p>
+                </>
+              )}
+            </div>
           )}
 
           {/* Notes */}
