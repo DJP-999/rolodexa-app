@@ -15,6 +15,7 @@ import {
   BarChart3,
   Snowflake,
   Calendar,
+  Map as MapIcon,
 } from "lucide-react";
 
 const NAV = [
@@ -22,6 +23,7 @@ const NAV = [
   { label: "Contacts", href: "/dashboard/contacts", Icon: Users },
   { label: "PitchBook", href: "/dashboard/pitchbook", Icon: Database },
   { label: "Calendar", href: "/dashboard/calendar", Icon: Calendar },
+  { label: "Map", href: "/dashboard/map", Icon: MapIcon },
   { label: "KPI Tracking", href: "/dashboard/kpi", Icon: BarChart3 },
   { label: "Cold Outreach", href: "/dashboard/cold-outreach", Icon: Snowflake },
   { label: "Projects", href: "/dashboard/projects", Icon: Briefcase },
