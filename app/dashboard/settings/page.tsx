@@ -59,6 +59,18 @@ const JOB_META: [string, string, string][] = [
 const inputCls =
   "mt-1.5 w-full rounded-lg border border-hairline bg-white px-3 py-2 text-sm outline-none focus:border-black/30";
 
+const SIT_LABELS: Record<string, string> = {
+  reschedule: "Reschedules",
+  deal_share: "Deal sends",
+  catch_up: "Catch-ups",
+  intro: "Intros",
+  follow_up: "Follow-ups",
+  scheduling: "Scheduling",
+  ask: "Asks",
+  thanks: "Thank-yous",
+  general: "General",
+};
+
 async function getData() {
   try {
     const user = await getPrimaryUser();
@@ -325,6 +337,21 @@ export default async function SettingsPage({
             </span>
             <textarea name="writingStyle" defaultValue={ctx?.writingStyle ?? ""} rows={3} className={inputCls} />
           </label>
+          {ctx?.writingStyleBySituation && Object.keys(ctx.writingStyleBySituation).length > 0 && (
+            <div className="rounded-lg border border-hairline bg-black/[0.02] p-3">
+              <div className="text-xs font-medium text-ink">Situational voices learned</div>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {Object.keys(ctx.writingStyleBySituation as Record<string, string>).map((k) => (
+                  <span key={k} className="rounded-full border border-hairline bg-white px-2 py-0.5 text-[11px] text-muted">
+                    {SIT_LABELS[k] ?? k}
+                  </span>
+                ))}
+              </div>
+              <p className="mt-1.5 text-[11px] text-muted">
+                Dexa writes each kind of outreach in the tone you actually use for it — learned from your sent mail.
+              </p>
+            </div>
+          )}
           <label className="block">
             <span className="text-sm font-medium text-ink">Timezone</span>
             <select name="timezone" defaultValue={ctx?.timezone ?? "America/New_York"} className={inputCls}>

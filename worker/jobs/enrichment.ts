@@ -17,7 +17,7 @@ import { writeClaim } from "@/lib/provenance/claims";
 import { mentionsContact } from "@/lib/match/entity";
 import { getXUserByUsername, getRecentTweets, normalizeHandle } from "@/lib/integrations/x";
 import { complete } from "@/lib/llm";
-import { deriveWritingStyle } from "@/lib/agent/style";
+import { deriveWritingStyle, deriveWritingStyleBySituation } from "@/lib/agent/style";
 import { runRecompute } from "./recompute";
 import { runFitGrade } from "./fitGrade";
 
@@ -827,6 +827,7 @@ export async function runEnrichment(): Promise<void> {
     void syncCalendar;
 
     await deriveWritingStyle(userId);
+    await deriveWritingStyleBySituation(userId);
     await categorizeUser(userId);
 
     if (isFirstRun) {

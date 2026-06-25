@@ -20,6 +20,27 @@ function attEmail(a: any): { email: string; name: string | null } | null {
   return { email, name };
 }
 
+/** A clean plain-text body for an email — HTML stripped, quoted reply chains removed —
+ *  so the voice learner reads what the user actually wrote. */
+function emailBody(e: any): string | null {
+  const plain = typeof e?.body_plain === "string" ? e.body_plain : null;
+  const html = typeof e?.body === "string" ? e.body : null;
+  const snip = typeof e?.snippet === "string" ? e.snippet : null;
+  let t = plain ?? snip ?? (html ? html.replace(/<[^>]+>/g, " ") : "");
+  if (!t) return null;
+  t = t
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/\s+/g, " ")
+    .trim();
+  // Drop quoted reply chains / forwarded headers so we only learn the user's own words.
+  t = t.split(/On .{0,60}wrote:/i)[0];
+  t = t.split(/From:\s.+?Sent:/i)[0];
+  return t.slice(0, 1200).trim() || null;
+}
+
 /** The mailbox's own address from a Unipile account object, so we can tell sent from received. */
 function accountEmail(a: any): string | null {
   const cands = [a?.name, a?.connection_params?.mail?.username, a?.connection_params?.mail?.email, a?.email];
@@ -82,6 +103,7 @@ export async function runEmailPoll(): Promise<void> {
           counterpartyEmail: other.email,
           counterpartyName: other.name,
           subject: typeof e?.subject === "string" ? e.subject : null,
+          text: emailBody(e),
         });
         inserted++;
       }

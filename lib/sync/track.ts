@@ -158,7 +158,7 @@ export async function logTouch(t: TouchInput): Promise<{ contactId: string | nul
       counterpartyEmail: normEmail(t.counterpartyEmail) || null,
       counterpartyName: t.counterpartyName ?? null,
       coldProspectId: coldId,
-      metadata: { subject: t.subject ?? null, text: t.text ? t.text.slice(0, 200) : null },
+      metadata: { subject: t.subject ?? null, text: t.text ? t.text.slice(0, 1200) : null },
     })
     .onConflictDoNothing();
 

@@ -2,7 +2,7 @@
 
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { calendarEvents, connectedAccounts, contacts, interactions, userContext } from "@/db/schema";
+import { calendarEvents, connectedAccounts, contacts, interactions } from "@/db/schema";
 import { getPrimaryUser } from "@/lib/user";
 import { promoteColdProspect, selfEmails, normEmail } from "@/lib/sync/track";
 import { isNoiseEmail } from "@/lib/sync/noise";
@@ -11,6 +11,7 @@ import { enqueue } from "@/worker/scheduler";
 import { complete } from "@/lib/llm";
 import { sendEmail } from "@/lib/integrations/unipile";
 import { stripEmDashes } from "@/lib/agent/tone";
+import { getWritingStyleFor } from "@/lib/agent/style";
 
 const RESCHEDULE_SUBJECT = "Grabbing time next week?";
 
@@ -53,7 +54,8 @@ export async function draftReschedule(
   const g = await resolveGuest(u.id, ev);
   if (!g.to) return { ok: false, error: "No email on file for this guest." };
   const first = g.name.split(/\s+/)[0] || "there";
-  const ws = (await db.select({ w: userContext.writingStyle }).from(userContext).where(eq(userContext.userId, u.id)).limit(1))[0]?.w;
+  // Use the voice Dexa learned specifically for reschedule/missed-meeting notes.
+  const ws = await getWritingStyleFor(u.id, "reschedule");
 
   const out = await complete({
     tier: "strong",

@@ -6,6 +6,7 @@ import { isNews } from "@/lib/provenance/claims";
 import { mentionsContact } from "@/lib/match/entity";
 import { complete } from "@/lib/llm";
 import { TONE_GUIDE, stripEmDashes } from "@/lib/agent/tone";
+import { getWritingStyleFor } from "@/lib/agent/style";
 
 const TRIGGER_WEIGHT = { re_engage: 0.6, job_change: 0.9, milestone: 0.8 } as const;
 
@@ -116,7 +117,8 @@ export async function runSuggestions(): Promise<void> {
       const row = (
         await db.select().from(userContext).where(eq(userContext.userId, c.userId)).limit(1)
       )[0];
-      cx = { focus: row?.currentFocus ?? null, style: row?.writingStyle ?? null };
+      // Check-in drafts use the voice Dexa learned for casual catch-ups specifically.
+      cx = { focus: row?.currentFocus ?? null, style: await getWritingStyleFor(c.userId, "catch_up") };
       ctxCache.set(c.userId, cx);
     }
 

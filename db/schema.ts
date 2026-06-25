@@ -22,6 +22,8 @@ export const userContext = pgTable("user_context", {
   timezone: text("timezone").default("America/New_York"), writingStyle: text("writing_style"), firstEnrichDone: boolean("first_enrich_done").default(false),
   writingStyleSource: text("writing_style_source").default("auto"), writingStyleSamples: integer("writing_style_samples").default(0),
   writingStyleUpdatedAt: timestamp("writing_style_updated_at", { withTimezone: true }),
+  // Per-situation voice guides (reschedule, deal_share, catch_up, …) learned from sent mail.
+  writingStyleBySituation: jsonb("writing_style_by_situation").$type<Record<string, string>>().default({}),
   fieldGroupings: jsonb("field_groupings").$type<Record<string, { label: string; categories: string[]; multi?: boolean }>>().default({}),
   weights: jsonb("weights").$type<{professional:number;recency:number;relationship:number;geographic:number;trigger:number;replyPropensity:number}>().default({professional:30,recency:25,relationship:20,geographic:15,trigger:10,replyPropensity:0}),
   blacklistedEmails: jsonb("blacklisted_emails").$type<string[]>().default([]),
