@@ -17,13 +17,18 @@ export type Row = {
   status: string | null;
   highValue: boolean | null;
   lastDays: string;
+  lastContactedAt: string | null;
   customFields: Record<string, string>;
   normalizedFields: Record<string, string>;
 };
 export type Facet = { key: string; label: string; categories: string[]; multi?: boolean };
 type ColDef = { key: string; label: string; custom?: boolean };
 
+// "lastInteraction" is pinned + always shown (see shownCols) — a relationship CRM must
+// always answer "when did I last talk to them", regardless of imported columns.
+const PINNED = "lastInteraction";
 const CORE: { key: string; label: string }[] = [
+  { key: "lastInteraction", label: "Last interaction" },
   { key: "company", label: "Company" },
   { key: "industry", label: "Industry" },
   { key: "location", label: "Location" },
@@ -32,7 +37,7 @@ const CORE: { key: string; label: string }[] = [
   { key: "relevance", label: "Relevance" },
   { key: "days", label: "Days" },
 ];
-const DEFAULT_VISIBLE = ["company", "industry", "relationship", "fit", "relevance", "days"];
+const DEFAULT_VISIBLE = ["company", "industry", "relationship", "fit", "relevance"];
 const STORAGE_KEY = "rolodexa.contactCols";
 const ORDER_KEY = "rolodexa.contactOrder";
 const SORT_KEY = "rolodexa.contactSort";
@@ -191,9 +196,12 @@ export function ContactsTable({
     ...order.filter((k) => allCols.some((c) => c.key === k)),
     ...allCols.map((c) => c.key).filter((k) => !order.includes(k)),
   ];
-  const shownCols = orderedKeys
+  const configurable = orderedKeys
     .map((k) => allCols.find((c) => c.key === k))
-    .filter((c): c is ColDef => !!c && visible.includes(c.key));
+    .filter((c): c is ColDef => !!c && c.key !== PINNED && visible.includes(c.key));
+  // Last interaction is always present, pinned right after Name — never hidden or reordered out.
+  const pinned = allCols.find((c) => c.key === PINNED)!;
+  const shownCols = [pinned, ...configurable];
   const colSpan = shownCols.length + 1; // + name column
 
   const onDropCol = (targetKey: string) => {
@@ -223,6 +231,8 @@ export function ContactsTable({
         return r.relevance ?? -1;
       case "fit":
         return r.professionalFit ?? -1;
+      case "lastInteraction":
+        return r.lastContactedAt ? new Date(r.lastContactedAt).getTime() : -1;
       case "days": {
         const n = parseInt(r.lastDays, 10);
         return isNaN(n) ? Number.MAX_SAFE_INTEGER : n;
@@ -312,6 +322,18 @@ export function ContactsTable({
           </span>
         );
       }
+      case "lastInteraction": {
+        if (!r.lastContactedAt) return <span className="text-muted">No record yet</span>;
+        const dt = new Date(r.lastContactedAt);
+        const days = Math.floor((Date.now() - dt.getTime()) / 86_400_000);
+        const date = dt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+        const ago = days <= 0 ? "today" : days === 1 ? "yesterday" : `${days}d ago`;
+        return (
+          <span className="whitespace-nowrap text-[13px] text-ink">
+            {date} <span className="text-muted">· {ago}</span>
+          </span>
+        );
+      }
       case "days":
         return <span className="text-[13px] font-medium text-emerald-600">{r.lastDays}</span>;
       default:
@@ -352,7 +374,9 @@ export function ContactsTable({
                 Show columns
               </div>
               <div className="max-h-72 overflow-y-auto">
-                {allCols.map((c) => (
+                {allCols
+                  .filter((c) => c.key !== PINNED)
+                  .map((c) => (
                   <label
                     key={c.key}
                     className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-black/[0.03]"
