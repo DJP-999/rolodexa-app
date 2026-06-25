@@ -3,11 +3,13 @@ import { db } from "@/db";
 import { connectedAccounts } from "@/db/schema";
 import { isConfigured } from "@/lib/env";
 import { listRecentMessages } from "@/lib/integrations/nylas";
-import { getEmails, unipileConfigured } from "@/lib/integrations/unipile";
+import { getEmails, listAccounts, unipileConfigured } from "@/lib/integrations/unipile";
 import { logTouch, normEmail, selfEmails } from "@/lib/sync/track";
 import { cleanupNoiseProspects } from "@/lib/sync/noise";
 
-const LOOKBACK_MS = 2 * 60 * 60 * 1000; // 2h window; the unique index dedupes overlap.
+// Wide window so a re-run backfills recently-sent mail (the unique index dedupes overlap).
+const UNIPILE_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
+const NYLAS_LOOKBACK_MS = 2 * 60 * 60 * 1000;
 
 /** First attendee identifier (email) from a Unipile email attendee field, defensively. */
 function attEmail(a: any): { email: string; name: string | null } | null {
@@ -18,17 +20,30 @@ function attEmail(a: any): { email: string; name: string | null } | null {
   return { email, name };
 }
 
+/** The mailbox's own address from a Unipile account object, so we can tell sent from received. */
+function accountEmail(a: any): string | null {
+  const cands = [a?.name, a?.connection_params?.mail?.username, a?.connection_params?.mail?.email, a?.email];
+  for (const c of cands) if (typeof c === "string" && c.includes("@")) return c.toLowerCase().trim();
+  return null;
+}
+
 /**
  * Every-30-min poll. Pulls recent mail and appends idempotent touchpoints — BOTH
  * directions — resolving each to a contact, a cold prospect, or neither. Handles the
  * live Unipile email grant (provider "email") and any legacy Nylas grant.
  */
 export async function runEmailPoll(): Promise<void> {
-  const cutoff = Date.now() - LOOKBACK_MS;
   let inserted = 0;
 
   // --- Unipile email accounts (the live integration) ---
   if (unipileConfigured()) {
+    const cutoff = Date.now() - UNIPILE_LOOKBACK_MS;
+    // Map each connected mailbox to its own address so we classify direction correctly.
+    const acctEmailById = new Map<string, string>();
+    for (const a of await listAccounts()) {
+      const em = accountEmail(a);
+      if (em && a?.id) acctEmailById.set(String(a.id), em);
+    }
     const accts = await db
       .select()
       .from(connectedAccounts)
@@ -36,7 +51,9 @@ export async function runEmailPoll(): Promise<void> {
     for (const g of accts) {
       if (!g.externalId) continue;
       const self = await selfEmails(g.userId);
-      const emails = await getEmails(g.externalId, 80);
+      const own = acctEmailById.get(g.externalId);
+      if (own) self.add(own);
+      const emails = await getEmails(g.externalId, 200);
       for (const e of emails) {
         const id = e?.id ?? e?.message_id;
         const dateRaw = e?.date ?? e?.timestamp ?? e?.received_date;
@@ -77,7 +94,7 @@ export async function runEmailPoll(): Promise<void> {
       .select()
       .from(connectedAccounts)
       .where(eq(connectedAccounts.provider, "nylas_email"));
-    const since = Math.floor(cutoff / 1000);
+    const since = Math.floor((Date.now() - NYLAS_LOOKBACK_MS) / 1000);
     for (const g of grants) {
       if (!g.externalId) continue;
       const self = await selfEmails(g.userId);
