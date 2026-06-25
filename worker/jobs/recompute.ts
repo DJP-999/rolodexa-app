@@ -12,12 +12,12 @@ import {
 // Fit-first defaults: professional (now an LLM domain-fit grade) dominates, so who a
 // contact IS matters more than how recently you happened to email them.
 const DEFAULT_WEIGHTS: Weights = {
-  professional: 45,
-  recency: 20,
-  relationship: 15,
-  geographic: 8,
+  professional: 60,
+  recency: 15,
+  relationship: 10,
+  geographic: 5,
   trigger: 0,
-  replyPropensity: 12,
+  replyPropensity: 10,
 };
 
 type Ctx = {

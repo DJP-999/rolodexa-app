@@ -115,5 +115,9 @@ export async function ensureSchema(sql: {
     "id" IN (SELECT "matched_contact_id" FROM "calendar_events" WHERE "matched_contact_id" IS NOT NULL)
     OR "id" IN (SELECT "promoted_contact_id" FROM "cold_prospects" WHERE "promoted_contact_id" IS NOT NULL)
   )`);
+  // Raise professional/thesis-fit to 60% of relevance for anyone still on a lower baseline,
+  // so an on-thesis investor ranks high on who they are, not just interaction history.
+  await sql.unsafe(`UPDATE "user_context" SET "weights" = '{"professional":60,"recency":15,"relationship":10,"geographic":5,"trigger":0,"replyPropensity":10}'::jsonb
+    WHERE "weights" IS NULL OR ("weights"->>'professional') IS NULL OR ("weights"->>'professional')::numeric < 60`);
   console.log("[db] ensureSchema applied.");
 }

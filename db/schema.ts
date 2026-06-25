@@ -25,7 +25,7 @@ export const userContext = pgTable("user_context", {
   // Per-situation voice guides (reschedule, deal_share, catch_up, …) learned from sent mail.
   writingStyleBySituation: jsonb("writing_style_by_situation").$type<Record<string, string>>().default({}),
   fieldGroupings: jsonb("field_groupings").$type<Record<string, { label: string; categories: string[]; multi?: boolean }>>().default({}),
-  weights: jsonb("weights").$type<{professional:number;recency:number;relationship:number;geographic:number;trigger:number;replyPropensity:number}>().default({professional:30,recency:25,relationship:20,geographic:15,trigger:10,replyPropensity:0}),
+  weights: jsonb("weights").$type<{professional:number;recency:number;relationship:number;geographic:number;trigger:number;replyPropensity:number}>().default({professional:60,recency:15,relationship:10,geographic:5,trigger:0,replyPropensity:10}),
   blacklistedEmails: jsonb("blacklisted_emails").$type<string[]>().default([]),
   observationUntil: date("observation_until"),
   maxNudgesPerDay: integer("max_nudges_per_day").default(3),
