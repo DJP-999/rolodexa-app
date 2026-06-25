@@ -7,7 +7,7 @@ import { getPrimaryUser } from "@/lib/user";
 import { promoteColdProspect, selfEmails, normEmail } from "@/lib/sync/track";
 import { isNoiseEmail } from "@/lib/sync/noise";
 import { applyMeetingNotes } from "@/lib/notes/interpret";
-import { enqueue } from "@/worker/scheduler";
+import { gradeContactFit } from "@/worker/jobs/fitGrade";
 import { complete } from "@/lib/llm";
 import { sendEmail } from "@/lib/integrations/unipile";
 import { stripEmDashes } from "@/lib/agent/tone";
@@ -195,10 +195,11 @@ export async function setMeetingOutcome(id: string, held: boolean): Promise<{ ok
     }
   }
 
-  // Dexa reads the meeting notes and files them into the contact's fields, then re-grades.
-  if (held && contactId && ev.notes && ev.notes.trim()) {
-    await applyMeetingNotes(contactId, ev.notes);
-    await enqueue("fit-grade");
+  // Dexa reads the meeting notes, files them into the contact's fields, then instantly
+  // re-scores just this contact (no waiting on a full-network pass).
+  if (held && contactId) {
+    if (ev.notes && ev.notes.trim()) await applyMeetingNotes(contactId, ev.notes);
+    await gradeContactFit(contactId);
   }
   return { ok: true };
 }
