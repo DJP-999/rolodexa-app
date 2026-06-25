@@ -2,26 +2,49 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { calendarEvents, coldProspects, connectedAccounts, contacts, interactions, users } from "@/db/schema";
 import { getBlacklist, isNoiseEmail } from "@/lib/sync/noise";
+import { listAccounts } from "@/lib/integrations/unipile";
 
-/** The user's own address(es): their login email + every connected mailbox/calendar
- *  address. Used to tell inbound from outbound and to never treat the user as the
- *  counterparty on their own meetings. */
+/** Pull a mailbox address off a Unipile account object, defensively. */
+function accountEmail(a: any): string | null {
+  const cands = [a?.name, a?.connection_params?.mail?.username, a?.connection_params?.mail?.email, a?.email];
+  for (const c of cands) if (typeof c === "string" && c.includes("@")) return c.toLowerCase().trim();
+  return null;
+}
+
+const selfCache = new Map<string, { set: Set<string>; ts: number }>();
+
+/** The user's own address(es): login email + every connected mailbox/calendar address
+ *  (including the Unipile mailbox, resolved from the account). Used to tell inbound from
+ *  outbound and to NEVER treat the user as the counterparty/contact on their own meetings.
+ *  Cached briefly so polls don't re-hit Unipile on every touch. */
 export async function selfEmails(userId: string): Promise<Set<string>> {
+  const cached = selfCache.get(userId);
+  if (cached && Date.now() - cached.ts < 5 * 60 * 1000) return cached.set;
   const set = new Set<string>();
   try {
     const u = (await db.select({ email: users.email }).from(users).where(eq(users.id, userId)).limit(1))[0];
     if (u?.email) set.add(normEmail(u.email));
     const accts = await db
-      .select({ metadata: connectedAccounts.metadata })
+      .select({ provider: connectedAccounts.provider, externalId: connectedAccounts.externalId, metadata: connectedAccounts.metadata })
       .from(connectedAccounts)
       .where(eq(connectedAccounts.userId, userId));
     for (const a of accts) {
       const m = (a.metadata ?? {}) as { email?: string };
       if (m.email) set.add(normEmail(m.email));
     }
+    // Resolve the connected Unipile mailbox's own address (its metadata lacks the email).
+    const emailIds = new Set(accts.filter((a) => a.provider === "email" && a.externalId).map((a) => String(a.externalId)));
+    if (emailIds.size) {
+      for (const acct of await listAccounts()) {
+        if (!acct?.id || !emailIds.has(String(acct.id))) continue;
+        const em = accountEmail(acct);
+        if (em) set.add(em);
+      }
+    }
   } catch {
     /* ignore */
   }
+  selfCache.set(userId, { set, ts: Date.now() });
   return set;
 }
 
@@ -409,6 +432,7 @@ export async function promoteColdProspect(id: string): Promise<string | null> {
           company: p.company ?? null,
           linkedinMemberId: p.linkedinMemberId ?? null,
           relationship: "other",
+          source: "meeting",
           lastContactedAt: p.lastInboundAt ?? p.lastOutboundAt ?? new Date(),
         })
         .returning({ id: contacts.id })

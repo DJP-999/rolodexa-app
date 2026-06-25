@@ -172,6 +172,7 @@ export async function importCsvAction(formData: FormData) {
       linkedinUrl: at(row, iUrl) || null,
       relationship: guessRelationship(company, role),
       customFields: custom,
+      source: "csv",
     });
   }
 
@@ -217,6 +218,7 @@ export async function addContactAction(formData: FormData) {
     role: g("role") || null,
     location: g("location") || null,
     relationship: (g("relationship") || "other") as Rel,
+    source: "manual",
   });
   await runOnce("recompute");
   redirect("/dashboard/contacts?added=1");

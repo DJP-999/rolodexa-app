@@ -143,6 +143,7 @@ async function contactFromEvent(
         name,
         email: email || null,
         relationship: "other",
+        source: "meeting",
         lastContactedAt: ev.startAt,
       })
       .returning({ id: contacts.id })

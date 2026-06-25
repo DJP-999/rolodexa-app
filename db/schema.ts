@@ -57,6 +57,8 @@ export const contacts = pgTable("contacts", {
   // Firm intel matched from the user's imported PitchBook reference data (kept separate
   // from the user's own customFields/normalizedFields — never overwrites their data).
   pitchbookData: jsonb("pitchbook_data").$type<Record<string, string>>(),
+  // How this contact entered the rolodex: manual | meeting | csv | split | linkedin.
+  source: text("source"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (t) => ({ userIdx: index("contacts_user_idx").on(t.userId), emailIdx: index("contacts_email_idx").on(t.userId, t.email), relevanceIdx: index("contacts_relevance_idx").on(t.userId, t.relevance) }));
 // PitchBook export reference data — FIRMS/investors. Deliberately a SEPARATE table from

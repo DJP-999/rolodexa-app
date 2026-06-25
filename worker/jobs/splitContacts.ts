@@ -108,6 +108,7 @@ export async function runSplitContacts(): Promise<void> {
         location: orig.location,
         industry: orig.industry,
         relationship: orig.relationship,
+        source: orig.source ?? "csv",
         customFields: orig.customFields,
         normalizedFields: orig.normalizedFields,
         relevance: orig.relevance,
