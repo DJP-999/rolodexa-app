@@ -10,6 +10,8 @@ import {
   getChatAttendees,
   getEmails,
   getProfile,
+  getCalendars,
+  getCalendarEvents,
 } from "@/lib/integrations/unipile";
 import { writeClaim } from "@/lib/provenance/claims";
 import { mentionsContact } from "@/lib/match/entity";
@@ -435,6 +437,73 @@ async function syncEmail(userId: string, emailId: string): Promise<void> {
   console.log(`[enrichment] email synced ${n} messages`);
 }
 
+/**
+ * Calendar sync — pulls meetings from the connected Google/Outlook calendar and writes a
+ * "meeting" interaction for every attendee who is one of your contacts, so the Last
+ * interaction column reflects calls/meetings, not just email + LinkedIn. Reuses the same
+ * Unipile account as email. No-ops cleanly if the grant has no calendar access.
+ */
+async function syncCalendar(userId: string, accountId: string): Promise<void> {
+  const cs = await db
+    .select({ id: contacts.id, email: contacts.email })
+    .from(contacts)
+    .where(eq(contacts.userId, userId));
+  const emailToContact = new Map<string, string>();
+  for (const c of cs) if (c.email) emailToContact.set(norm(c.email), c.id);
+  if (!emailToContact.size) return;
+
+  const cals = await getCalendars(accountId);
+  if (!cals.length) {
+    console.log("[enrichment] calendar: none accessible (grant may lack calendar scope)");
+    return;
+  }
+  const cutoff = Date.now() - 365 * 86_400_000; // last year of meetings
+  let n = 0;
+  for (const cal of cals.slice(0, 4)) {
+    const calId = (cal as any)?.id ?? (cal as any)?.calendar_id ?? (cal as any)?.email;
+    if (!calId) continue;
+    const events = await getCalendarEvents(accountId, String(calId));
+    for (const ev of events as any[]) {
+      const rawStart =
+        ev?.start?.date_time ?? ev?.start?.dateTime ?? ev?.start?.date ?? ev?.start_time ?? ev?.start ?? ev?.when?.start_time;
+      const when = rawStart ? new Date(typeof rawStart === "number" ? rawStart * 1000 : rawStart) : null;
+      if (!when || isNaN(when.getTime()) || when.getTime() < cutoff) continue;
+      const attendees: any[] = ev?.attendees ?? ev?.participants ?? [];
+      const evId = String(ev?.id ?? `${calId}:${when.getTime()}`);
+      const matched = new Set<string>();
+      for (const a of attendees) {
+        const em = norm(String(a?.email ?? a?.identifier ?? a?.address ?? ""));
+        const cid = em ? emailToContact.get(em) : undefined;
+        if (cid) matched.add(cid);
+      }
+      for (const cid of matched) {
+        await db
+          .insert(interactions)
+          .values({
+            userId,
+            contactId: cid,
+            eventType: "meeting",
+            direction: null,
+            channel: "nylas_calendar",
+            occurredAt: when,
+            sourceRef: `${evId}:${cid}`,
+            metadata: {
+              title:
+                typeof ev?.title === "string"
+                  ? ev.title.slice(0, 200)
+                  : typeof ev?.summary === "string"
+                    ? ev.summary.slice(0, 200)
+                    : null,
+            },
+          })
+          .onConflictDoNothing();
+        n++;
+      }
+    }
+  }
+  console.log(`[enrichment] calendar synced ${n} meeting interaction(s)`);
+}
+
 async function categorizeUser(userId: string): Promise<void> {
   const refreshed = await db.select().from(contacts).where(eq(contacts.userId, userId));
   const need = refreshed.filter(
@@ -753,6 +822,7 @@ export async function runEnrichment(): Promise<void> {
 
     const emailId = await accountId(userId, "email");
     if (emailId) await syncEmail(userId, emailId);
+    if (emailId) await syncCalendar(userId, emailId);
 
     await deriveWritingStyle(userId);
     await categorizeUser(userId);

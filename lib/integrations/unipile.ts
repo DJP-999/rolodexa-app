@@ -228,3 +228,52 @@ export async function getEmails(accountId: string, limit = 200): Promise<any[]> 
     return [];
   }
 }
+
+/**
+ * Calendar — the SDK doesn't wrap it, so we call Unipile's REST API directly with the
+ * SAME connected Google/Outlook account as email. Reuses the existing grant (no new
+ * login) as long as that grant was authorized with calendar access.
+ */
+export async function getCalendars(accountId: string): Promise<any[]> {
+  if (!isConfigured("unipile")) return [];
+  try {
+    const res = await fetch(`${dsnBase()}/api/v1/calendars?account_id=${encodeURIComponent(accountId)}`, {
+      headers: { "X-API-KEY": env.UNIPILE_API_KEY!, accept: "application/json" },
+    });
+    if (!res.ok) {
+      console.error(`[unipile] getCalendars → ${res.status}`);
+      return [];
+    }
+    const data: any = await res.json();
+    return data?.items ?? data?.data ?? (Array.isArray(data) ? data : []);
+  } catch (e) {
+    console.error("[unipile] getCalendars", e);
+    return [];
+  }
+}
+
+/** Events for one calendar (paginated, capped). Date filtering happens at the call site. */
+export async function getCalendarEvents(accountId: string, calendarId: string): Promise<any[]> {
+  if (!isConfigured("unipile")) return [];
+  const out: any[] = [];
+  let cursor: string | undefined;
+  try {
+    do {
+      const url = new URL(`${dsnBase()}/api/v1/calendars/${encodeURIComponent(calendarId)}/events`);
+      url.searchParams.set("account_id", accountId);
+      url.searchParams.set("limit", "100");
+      if (cursor) url.searchParams.set("cursor", cursor);
+      const res = await fetch(url, { headers: { "X-API-KEY": env.UNIPILE_API_KEY!, accept: "application/json" } });
+      if (!res.ok) {
+        console.error(`[unipile] getCalendarEvents → ${res.status}`);
+        break;
+      }
+      const data: any = await res.json();
+      out.push(...(data?.items ?? data?.data ?? []));
+      cursor = data?.cursor ?? data?.paging?.cursor ?? data?.next_cursor ?? undefined;
+    } while (cursor && out.length < 500);
+  } catch (e) {
+    console.error("[unipile] getCalendarEvents", e);
+  }
+  return out;
+}
