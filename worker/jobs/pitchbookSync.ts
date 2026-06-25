@@ -3,33 +3,43 @@ import { db } from "@/db";
 import { contacts, pitchbookFirms } from "@/db/schema";
 import { firmPhrase } from "@/lib/match/entity";
 
-/** Map a PitchBook firm's raw columns onto the same facet keys the contacts UI uses. */
+// Friendly label -> PitchBook header(s), in preference order. Captured onto each matched
+// contact so the firm's essential intel travels with the rolodex.
+const FIELD_MAP: [string, RegExp[], number][] = [
+  ["Firm Type", [/^primary investor type$/i, /^investor type$/i], 100],
+  ["Description", [/^description$/i], 600],
+  ["Year Founded", [/^year founded$/i], 12],
+  ["HQ Location", [/^hq location$/i], 100],
+  ["Website", [/^website$/i], 120],
+  ["Primary Contact", [/^primary contact$/i], 100],
+  ["Primary Contact Email", [/^primary contact email$/i], 120],
+  ["AUM", [/^aum$/i], 60],
+  ["Check Size", [/^preferred deal size$/i, /^preferred investment amount$/i], 80],
+  ["Fund Size", [/^median fund size$/i, /^last closed fund size$/i], 60],
+  ["Preferred Industry", [/^preferred industry$/i], 240],
+  ["Preferred Verticals", [/^preferred verticals?$/i], 240],
+  ["Preferred Geography", [/^preferred geography$/i], 160],
+  ["Preferred Investment Types", [/^preferred investment types?$/i], 160],
+  ["Last Investment", [/^last investment company$/i], 100],
+  ["Last Investment Date", [/^last investment date$/i], 40],
+  ["Last Investment Type", [/^last investment type$/i], 80],
+  ["Last Investment Type 2", [/^last investment type 2$/i], 80],
+  ["Last Investment Class", [/^last investment class$/i], 80],
+];
+
+/** Pull the essential PitchBook firm fields onto clean labels (matched by exact header). */
 function deriveFirmFields(cf: Record<string, string>): Record<string, string> {
   const entries = Object.entries(cf);
-  const pick = (res: RegExp[]): string | undefined => {
-    for (const re of res) {
-      const hit = entries.find(([k, v]) => v && re.test(k));
-      if (hit) return hit[1];
-    }
-    return undefined;
-  };
   const out: Record<string, string> = {};
-  const firmType = pick([/^primary investor type$/i, /primary investor type/i, /investor type/i, /\bfirm type\b/i]);
-  const region = pick([/^hq location$/i, /hq location/i, /preferred geograph/i, /hq country/i, /\bregion\b/i, /\blocation\b/i]);
-  const sectors = pick([/preferred industr/i, /preferred vertical/i, /^all industries$/i, /^verticals$/i, /industr/i, /vertical/i]);
-  const check = pick([/^preferred deal size$/i, /preferred deal size\b/i, /^preferred ebitda$/i, /preferred ebitda\b/i, /deal size/i, /investment size/i]);
-  const fund = pick([/median fund size/i, /last closed fund size/i, /max fund size/i, /fund size/i, /dry powder/i]);
-  const aum = pick([/^aum$/i, /\baum\b/i, /assets under management/i]);
-  const desc = pick([/^description$/i, /description/i]);
-  if (firmType) out["Firm Type"] = firmType.slice(0, 80);
-  if (region) out["Region"] = region.slice(0, 80);
-  if (sectors) out["Interests"] = sectors.slice(0, 200);
-  if (check) out["Check Size"] = check.slice(0, 80);
-  if (fund) out["Fund Size"] = fund.slice(0, 80);
-  if (aum) out["AUM"] = aum.slice(0, 80);
-  // Description is rich firm context for the fit grader; it has no contact column, so it
-  // won't render in the table — it only enriches grading.
-  if (desc) out["Description"] = desc.slice(0, 320);
+  for (const [label, res, cap] of FIELD_MAP) {
+    for (const re of res) {
+      const hit = entries.find(([k, v]) => v && re.test(k.trim()));
+      if (hit) {
+        out[label] = hit[1].slice(0, cap);
+        break;
+      }
+    }
+  }
   return out;
 }
 

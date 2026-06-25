@@ -20,6 +20,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     relevance: c.relevance,
     fit: c.professionalFit ?? null,
     rationale: c.gradeRationale ?? null,
+    pitchbook: (c.pitchbookData ?? null) as Record<string, string> | null,
     lastContactedAt: c.lastContactedAt,
     bio,
     stats,

@@ -7,7 +7,15 @@ import { PitchbookImport } from "./PitchbookImport";
 
 export const dynamic = "force-dynamic";
 
-const COLS = ["Firm Type", "Region", "Interests", "Check Size", "Fund Size", "AUM"];
+const COLS = [
+  "Firm Type",
+  "HQ Location",
+  "Year Founded",
+  "AUM",
+  "Check Size",
+  "Preferred Industry",
+  "Last Investment",
+];
 
 async function getFirms() {
   const u = await getPrimaryUser();

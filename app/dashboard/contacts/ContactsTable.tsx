@@ -102,12 +102,74 @@ function Summary({ d, id }: { d: any; id: string }) {
           <span className="text-ink">{s.lastMeeting ? fmt(s.lastMeeting) : "—"}</span>
         </div>
       </div>
+      {d.pitchbook && Object.keys(d.pitchbook).length > 0 && <PitchbookProfile pb={d.pitchbook} />}
       <Link
         href={`/dashboard/contacts/${id}`}
         className="inline-flex items-center gap-1 text-[#2d6cf6] hover:underline"
       >
         View full profile <ArrowRight className="h-3.5 w-3.5" />
       </Link>
+    </div>
+  );
+}
+
+const PB_ORDER = [
+  "Description",
+  "Firm Type",
+  "Year Founded",
+  "HQ Location",
+  "Website",
+  "Primary Contact",
+  "Primary Contact Email",
+  "AUM",
+  "Check Size",
+  "Fund Size",
+  "Preferred Industry",
+  "Preferred Verticals",
+  "Preferred Geography",
+  "Preferred Investment Types",
+  "Last Investment",
+  "Last Investment Date",
+  "Last Investment Type",
+  "Last Investment Type 2",
+  "Last Investment Class",
+];
+
+/** Firm intel pulled from the user's PitchBook reference data for this contact's firm. */
+function PitchbookProfile({ pb }: { pb: Record<string, string> }) {
+  const keys = PB_ORDER.filter((k) => pb[k]);
+  return (
+    <div className="rounded-xl border border-indigo-200/70 bg-indigo-50/40 p-3">
+      <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-indigo-600">
+        PitchBook firm intel
+        <span className="rounded bg-indigo-100 px-1 text-[9px] font-semibold text-indigo-500">PB</span>
+      </div>
+      {pb["Description"] && <p className="mt-1.5 text-ink/80">{pb["Description"]}</p>}
+      <div className="mt-2 grid grid-cols-1 gap-x-8 gap-y-1 sm:grid-cols-2">
+        {keys
+          .filter((k) => k !== "Description")
+          .map((k) => (
+            <div key={k}>
+              <span className="text-muted">{k}: </span>
+              {/Email/.test(k) ? (
+                <a href={`mailto:${pb[k]}`} className="text-[#2d6cf6] hover:underline">
+                  {pb[k]}
+                </a>
+              ) : k === "Website" ? (
+                <a
+                  href={pb[k].startsWith("http") ? pb[k] : `https://${pb[k]}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[#2d6cf6] hover:underline"
+                >
+                  {pb[k]}
+                </a>
+              ) : (
+                <span className="text-ink">{pb[k]}</span>
+              )}
+            </div>
+          ))}
+      </div>
     </div>
   );
 }
@@ -285,7 +347,14 @@ export function ContactsTable({
       const own = r.normalizedFields?.[col.key] || r.customFields?.[col.key];
       if (own) return own;
       // Fall back to PitchBook firm intel (clearly tagged; never your own data).
-      const pb = r.pitchbookData?.[col.key];
+      const pbd = r.pitchbookData;
+      const pb = pbd
+        ? col.key === "Region"
+          ? pbd["Region"] || pbd["HQ Location"] || pbd["Preferred Geography"]
+          : col.key === "Interests"
+            ? pbd["Interests"] || pbd["Preferred Industry"] || pbd["Preferred Verticals"]
+            : pbd[col.key]
+        : undefined;
       if (pb)
         return (
           <span className="inline-flex items-center gap-1">
