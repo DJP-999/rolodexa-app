@@ -192,6 +192,39 @@ export default async function ContactProfile({ params }: { params: Promise<{ id:
         )}
       </div>
 
+      {/* Meeting intel — structured fields Dexa parsed from your meeting notes */}
+      {(() => {
+        const cf = (c.customFields ?? {}) as Record<string, string>;
+        const INTEL: [string, string][] = [
+          ["Deal Interest", "Deal Interest"],
+          ["Sectors", "Sectors"],
+          ["Portfolio", "Portfolio"],
+          ["Targets", "Targets / wants"],
+          ["Deal Structure", "Deal Structure"],
+        ];
+        const present = INTEL.filter(([k]) => cf[k]);
+        const notes = cf["Meeting Notes"];
+        if (!present.length && !notes) return null;
+        return (
+          <div className="mt-5 rounded-2xl border border-hairline bg-white p-5">
+            <div className="text-xs font-semibold tracking-wide text-[#c2683a]">MEETING INTEL</div>
+            {present.length > 0 && (
+              <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                {present.map(([k, label]) => (
+                  <Field key={k} label={label}>{cf[k]}</Field>
+                ))}
+              </div>
+            )}
+            {notes && (
+              <div className="mt-4 border-t border-hairline pt-4">
+                <div className="text-[11px] font-medium uppercase tracking-wide text-muted">Your notes</div>
+                <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-muted">{notes}</p>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
       {/* Enrichment — career, education, skills from the deep LinkedIn profile */}
       {hasEnrichment && (
         <div className="mt-5 rounded-2xl border border-hairline bg-white p-5">
