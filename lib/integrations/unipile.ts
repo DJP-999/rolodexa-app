@@ -229,6 +229,25 @@ export async function getEmails(accountId: string, limit = 200): Promise<any[]> 
   }
 }
 
+/** TEMP probe: raw GET against the Unipile API, returns status + body for endpoint discovery. */
+export async function unipileRawGet(path: string): Promise<{ status: number; body: unknown }> {
+  if (!isConfigured("unipile")) return { status: 0, body: "unconfigured" };
+  try {
+    const res = await fetch(`${dsnBase()}${path}`, {
+      headers: { "X-API-KEY": env.UNIPILE_API_KEY!, accept: "application/json" },
+    });
+    let body: unknown;
+    try {
+      body = await res.json();
+    } catch {
+      body = await res.text().catch(() => "");
+    }
+    return { status: res.status, body };
+  } catch (e) {
+    return { status: -1, body: String(e) };
+  }
+}
+
 /**
  * Calendar — the SDK doesn't wrap it, so we call Unipile's REST API directly with the
  * SAME connected Google/Outlook account as email. Reuses the existing grant (no new
