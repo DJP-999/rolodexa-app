@@ -14,20 +14,22 @@ function deriveFirmFields(cf: Record<string, string>): Record<string, string> {
     return undefined;
   };
   const out: Record<string, string> = {};
-  const firmType = pick([/primary investor type/i, /investor type/i, /\bfirm type\b/i, /entity type/i, /\btype\b/i]);
-  const region = pick([/hq location/i, /headquarters/i, /\blocation\b/i, /\bcountry\b/i, /\bcity\b/i, /\bregion\b/i, /geograph/i]);
-  const sectors = pick([/industr/i, /vertical/i, /\bsector/i, /investment focus/i, /\bfocus\b/i]);
-  const stage = pick([/investment stage/i, /\bstage/i, /investment type/i]);
-  const check = pick([/investment size/i, /typical (check|investment)/i, /deal size/i, /target (ebitda|revenue|size)/i]);
-  const fund = pick([/last fund size/i, /current fund/i, /fund size/i, /dry powder/i]);
-  const aum = pick([/\baum\b/i, /assets under management/i]);
+  const firmType = pick([/^primary investor type$/i, /primary investor type/i, /investor type/i, /\bfirm type\b/i]);
+  const region = pick([/^hq location$/i, /hq location/i, /preferred geograph/i, /hq country/i, /\bregion\b/i, /\blocation\b/i]);
+  const sectors = pick([/preferred industr/i, /preferred vertical/i, /^all industries$/i, /^verticals$/i, /industr/i, /vertical/i]);
+  const check = pick([/^preferred deal size$/i, /preferred deal size\b/i, /^preferred ebitda$/i, /preferred ebitda\b/i, /deal size/i, /investment size/i]);
+  const fund = pick([/median fund size/i, /last closed fund size/i, /max fund size/i, /fund size/i, /dry powder/i]);
+  const aum = pick([/^aum$/i, /\baum\b/i, /assets under management/i]);
+  const desc = pick([/^description$/i, /description/i]);
   if (firmType) out["Firm Type"] = firmType.slice(0, 80);
   if (region) out["Region"] = region.slice(0, 80);
-  if (sectors) out["Interests"] = sectors.slice(0, 160);
-  if (stage) out["Stage"] = stage.slice(0, 80);
+  if (sectors) out["Interests"] = sectors.slice(0, 200);
   if (check) out["Check Size"] = check.slice(0, 80);
   if (fund) out["Fund Size"] = fund.slice(0, 80);
   if (aum) out["AUM"] = aum.slice(0, 80);
+  // Description is rich firm context for the fit grader; it has no contact column, so it
+  // won't render in the table — it only enriches grading.
+  if (desc) out["Description"] = desc.slice(0, 320);
   return out;
 }
 

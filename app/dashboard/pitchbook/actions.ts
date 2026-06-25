@@ -2,8 +2,9 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { and, eq, inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import Papa from "papaparse";
+import * as XLSX from "xlsx";
 import { db } from "@/db";
 import { pitchbookFirms, contacts } from "@/db/schema";
 import { getPrimaryUser } from "@/lib/user";
@@ -12,29 +13,46 @@ import { enqueue } from "@/worker/scheduler";
 
 const norm = (s: string) => s.trim().toLowerCase();
 
-/** Find the firm/investor name column. */
+/** Find the firm/investor NAME column (PitchBook calls it "Investors"; avoid "Investor ID"). */
 function firmCol(headers: string[]): number {
-  const pref = [
+  const exact = [
+    "investors",
     "investor name",
+    "investor legal name",
     "company name",
     "firm name",
     "fund name",
     "organization name",
+    "name",
     "investor",
     "company",
     "firm",
-    "organization",
-    "name",
   ];
-  for (const p of pref) {
-    const exact = headers.findIndex((h) => h === p);
-    if (exact >= 0) return exact;
+  for (const p of exact) {
+    const i = headers.findIndex((h) => h === p);
+    if (i >= 0) return i;
   }
-  for (const p of pref) {
-    const sub = headers.findIndex((h) => h.includes(p));
-    if (sub >= 0) return sub;
+  for (const p of ["investor name", "company name", "firm name", "investors", "company", "firm"]) {
+    const i = headers.findIndex(
+      (h) => h.includes(p) && !/\bid\b|address|contact|email|phone|website/.test(h),
+    );
+    if (i >= 0) return i;
   }
   return 0;
+}
+
+/** Read a CSV or XLSX upload into a raw grid (array of rows). */
+async function toGrid(file: File): Promise<string[][]> {
+  const name = (file.name || "").toLowerCase();
+  if (name.endsWith(".xlsx") || name.endsWith(".xls")) {
+    const buf = Buffer.from(await file.arrayBuffer());
+    const wb = XLSX.read(buf, { type: "buffer" });
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: "" }) as unknown[][];
+    return rows.map((r) => (Array.isArray(r) ? r.map((c) => (c == null ? "" : String(c))) : []));
+  }
+  const text = await file.text();
+  return Papa.parse(text, { skipEmptyLines: "greedy" }).data as string[][];
 }
 
 /**
@@ -46,13 +64,10 @@ export async function importPitchbookAction(formData: FormData) {
   const file = formData.get("file") as File | null;
   if (!file || file.size === 0) redirect("/dashboard/pitchbook?error=nofile");
 
-  const text = await file.text();
-  const parsed = Papa.parse(text, { skipEmptyLines: "greedy" });
-  const grid = (parsed.data as string[][]).filter(
-    (r) => Array.isArray(r) && r.some((c) => c && c.trim()),
-  );
-  // Header = first row with multiple non-empty cells.
-  const headerIdx = grid.findIndex((row) => row.filter((c) => c && c.trim()).length >= 2);
+  const grid = await toGrid(file);
+  // PitchBook exports have a few preamble rows ("Downloaded on…", "All Columns") before
+  // the real header — so the header is the first row with MANY non-empty cells.
+  const headerIdx = grid.findIndex((row) => row.filter((c) => c && c.trim()).length >= 8);
   if (headerIdx === -1) redirect("/dashboard/pitchbook?error=noheader");
 
   const rawHeaders = grid[headerIdx].map((h) => (h ?? "").trim());
@@ -78,9 +93,11 @@ export async function importPitchbookAction(formData: FormData) {
     seen.add(key);
     const cf: Record<string, string> = {};
     let n = 0;
-    for (let j = 0; j < row.length && n < 50; j++) {
+    // PitchBook exports are wide (160+ cols); capture broadly so the key intel columns
+    // (Preferred Industry/Deal Size, AUM, etc.) aren't cut off.
+    for (let j = 0; j < row.length && n < 180; j++) {
       if (j === nameCol) continue;
-      const k = (rawHeaders[j] || `Column ${j + 1}`).slice(0, 60);
+      const k = (rawHeaders[j] || `Column ${j + 1}`).slice(0, 80);
       const v = (row[j] ?? "").trim().slice(0, 400);
       if (v) {
         cf[k] = v;
