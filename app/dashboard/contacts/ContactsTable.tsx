@@ -224,8 +224,26 @@ export function ContactsTable({
         }
         setVisible(vis);
       }
-      const o = localStorage.getItem(ORDER_KEY);
-      if (o) setOrder(JSON.parse(o));
+      let ord = localStorage.getItem(ORDER_KEY);
+      // One-time order patch: place Email + LinkedIn right after Company for users whose
+      // saved order predates them (otherwise new columns append far right, off-screen).
+      if (ord && !localStorage.getItem("rolodexa.contactColOrderMig")) {
+        try {
+          let o2: string[] = JSON.parse(ord);
+          if (Array.isArray(o2) && o2.length) {
+            o2 = o2.filter((k) => k !== "email" && k !== "linkedin");
+            const i = o2.indexOf("company");
+            const ins = ["email", "linkedin"];
+            o2 = i >= 0 ? [...o2.slice(0, i + 1), ...ins, ...o2.slice(i + 1)] : [...ins, ...o2];
+            ord = JSON.stringify(o2);
+            localStorage.setItem(ORDER_KEY, ord);
+          }
+        } catch {
+          /* ignore */
+        }
+        localStorage.setItem("rolodexa.contactColOrderMig", "1");
+      }
+      if (ord) setOrder(JSON.parse(ord));
       const s = localStorage.getItem(SORT_KEY);
       if (s) setSort(JSON.parse(s));
     } catch {
