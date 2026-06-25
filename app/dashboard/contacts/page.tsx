@@ -122,6 +122,8 @@ export default async function ContactsPage({
     id: c.id,
     name: c.name,
     role: c.role,
+    email: c.email,
+    linkedinUrl: c.linkedinUrl,
     company: c.company,
     industry: c.industry,
     location: c.location,

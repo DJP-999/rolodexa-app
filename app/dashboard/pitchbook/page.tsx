@@ -4,18 +4,9 @@ import { pitchbookFirms } from "@/db/schema";
 import { getPrimaryUser } from "@/lib/user";
 import { clearPitchbookAction } from "./actions";
 import { PitchbookImport } from "./PitchbookImport";
+import { PitchbookTable, type PBFacet } from "./PitchbookTable";
 
 export const dynamic = "force-dynamic";
-
-const COLS = [
-  "Firm Type",
-  "HQ Location",
-  "Year Founded",
-  "AUM",
-  "Check Size",
-  "Preferred Industry",
-  "Last Investment",
-];
 
 async function getFirms() {
   const u = await getPrimaryUser();
@@ -26,7 +17,7 @@ async function getFirms() {
       .from(pitchbookFirms)
       .where(eq(pitchbookFirms.userId, u.id))
       .orderBy(sql`lower(${pitchbookFirms.name})`)
-      .limit(1000);
+      .limit(5000);
   } catch {
     return [];
   }
@@ -35,17 +26,44 @@ async function getFirms() {
 export default async function PitchbookPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; imported?: string; error?: string }>;
+  searchParams: Promise<{ imported?: string; error?: string }>;
 }) {
   const sp = await searchParams;
   const firms = await getFirms();
-  const q = (sp.q ?? "").toLowerCase();
-  const rows = q
-    ? firms.filter((f) => {
-        const hay = `${f.name} ${Object.values((f.customFields ?? {}) as Record<string, string>).join(" ")}`.toLowerCase();
-        return hay.includes(q);
-      })
-    : firms;
+  const fieldsList = firms.map((f) => (f.normalizedFields ?? {}) as Record<string, string>);
+
+  const distinctSingle = (key: string, cap = 100): string[] => {
+    const m = new Map<string, number>();
+    for (const nf of fieldsList) {
+      const v = (nf[key] || "").trim();
+      if (v) m.set(v, (m.get(v) || 0) + 1);
+    }
+    return [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, cap).map((e) => e[0]).sort();
+  };
+  const distinctMulti = (key: string, cap = 100): string[] => {
+    const m = new Map<string, number>();
+    for (const nf of fieldsList) {
+      for (const part of (nf[key] || "").split(/[,;]\s*/)) {
+        const v = part.trim();
+        if (v) m.set(v, (m.get(v) || 0) + 1);
+      }
+    }
+    return [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, cap).map((e) => e[0]).sort();
+  };
+
+  const facets: PBFacet[] = [
+    { key: "Firm Type", label: "Firm Type", values: distinctSingle("Firm Type") },
+    { key: "Preferred Industry", label: "Industry", values: distinctMulti("Preferred Industry"), multi: true },
+    { key: "Preferred Verticals", label: "Vertical", values: distinctMulti("Preferred Verticals"), multi: true },
+    { key: "Preferred Geography", label: "Geography", values: distinctMulti("Preferred Geography"), multi: true },
+    { key: "Last Investment Type", label: "Last Inv. Type", values: distinctSingle("Last Investment Type") },
+  ].filter((f) => f.values.length);
+
+  const rows = firms.map((f) => ({
+    id: f.id,
+    name: f.name,
+    fields: (f.normalizedFields ?? {}) as Record<string, string>,
+  }));
 
   const banner =
     sp.error != null
@@ -55,7 +73,7 @@ export default async function PitchbookPage({
         : null;
 
   return (
-    <div className="mx-auto max-w-6xl">
+    <div className="mx-auto max-w-[1400px]">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-[28px] font-bold tracking-tight">PitchBook</h1>
@@ -88,37 +106,11 @@ export default async function PitchbookPage({
 
       {firms.length === 0 ? (
         <p className="mt-8 text-sm text-muted">
-          No PitchBook data yet. Import a firms/investors CSV export to start enriching your contacts.
+          No PitchBook data yet. Import a firms/investors export (.xlsx or .csv) to start enriching your contacts.
         </p>
       ) : (
-        <div className="mt-4 overflow-x-auto rounded-2xl border border-hairline bg-white">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-hairline text-left text-xs text-muted">
-                <th className="px-3 py-3 font-normal">Firm</th>
-                {COLS.map((c) => (
-                  <th key={c} className="whitespace-nowrap px-3 py-3 font-normal">
-                    {c}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.slice(0, 500).map((f) => {
-                const nf = (f.normalizedFields ?? {}) as Record<string, string>;
-                return (
-                  <tr key={f.id} className="border-b border-hairline/70">
-                    <td className="px-3 py-3 text-sm font-medium text-ink">{f.name}</td>
-                    {COLS.map((c) => (
-                      <td key={c} className="px-3 py-3 align-top text-[13px] text-muted">
-                        {nf[c] || "—"}
-                      </td>
-                    ))}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div className="mt-4">
+          <PitchbookTable rows={rows} facets={facets} />
         </div>
       )}
     </div>

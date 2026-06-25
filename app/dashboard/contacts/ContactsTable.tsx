@@ -8,6 +8,8 @@ export type Row = {
   id: string;
   name: string;
   role: string | null;
+  email: string | null;
+  linkedinUrl: string | null;
   company: string | null;
   industry: string | null;
   location: string | null;
@@ -31,6 +33,8 @@ const PINNED = "lastInteraction";
 const CORE: { key: string; label: string }[] = [
   { key: "lastInteraction", label: "Last interaction" },
   { key: "company", label: "Company" },
+  { key: "email", label: "Email" },
+  { key: "linkedin", label: "LinkedIn" },
   { key: "industry", label: "Industry" },
   { key: "location", label: "Location" },
   { key: "relationship", label: "Relationship" },
@@ -38,7 +42,7 @@ const CORE: { key: string; label: string }[] = [
   { key: "relevance", label: "Relevance" },
   { key: "days", label: "Days" },
 ];
-const DEFAULT_VISIBLE = ["company", "industry", "relationship", "fit", "relevance"];
+const DEFAULT_VISIBLE = ["company", "email", "linkedin", "industry", "relationship", "fit", "relevance"];
 const STORAGE_KEY = "rolodexa.contactCols";
 const ORDER_KEY = "rolodexa.contactOrder";
 const SORT_KEY = "rolodexa.contactSort";
@@ -208,6 +212,16 @@ export function ContactsTable({
           localStorage.setItem(STORAGE_KEY, JSON.stringify(vis));
           localStorage.setItem("rolodexa.contactCols.fitMig", "1");
         }
+        // One-time migration: surface Email + LinkedIn columns (right after Company).
+        if (Array.isArray(vis) && !localStorage.getItem("rolodexa.contactCols.contactColMig")) {
+          const add = ["email", "linkedin"].filter((k) => !vis.includes(k));
+          if (add.length) {
+            const i = vis.indexOf("company");
+            vis = i >= 0 ? [...vis.slice(0, i + 1), ...add, ...vis.slice(i + 1)] : [...add, ...vis];
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(vis));
+          }
+          localStorage.setItem("rolodexa.contactCols.contactColMig", "1");
+        }
         setVisible(vis);
       }
       const o = localStorage.getItem(ORDER_KEY);
@@ -284,6 +298,10 @@ export function ContactsTable({
         return r.name.toLowerCase();
       case "company":
         return (r.company ?? "").toLowerCase();
+      case "email":
+        return (r.email ?? "").toLowerCase();
+      case "linkedin":
+        return (r.linkedinUrl ?? "").toLowerCase();
       case "industry":
         return (r.industry ?? "").toLowerCase();
       case "location":
@@ -372,6 +390,28 @@ export function ContactsTable({
     switch (col.key) {
       case "company":
         return r.company ?? "—";
+      case "email":
+        return r.email ? (
+          <a href={`mailto:${r.email}`} className="text-[#2d6cf6] hover:underline" onClick={(e) => e.stopPropagation()}>
+            {r.email}
+          </a>
+        ) : (
+          <span className="text-muted">—</span>
+        );
+      case "linkedin":
+        return r.linkedinUrl ? (
+          <a
+            href={r.linkedinUrl.startsWith("http") ? r.linkedinUrl : `https://${r.linkedinUrl}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[#2d6cf6] hover:underline"
+            onClick={(e) => e.stopPropagation()}
+          >
+            Profile
+          </a>
+        ) : (
+          <span className="text-muted">—</span>
+        );
       case "industry":
         return r.industry ?? "—";
       case "location":
