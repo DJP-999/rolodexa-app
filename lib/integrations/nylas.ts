@@ -49,11 +49,60 @@ export async function getMessage(grantId: string, messageId: string): Promise<Ny
   return data?.data ?? null;
 }
 
-export async function listEvents(grantId: string, startUnix: number, endUnix: number): Promise<NylasEvent[]> {
+export async function listEvents(
+  grantId: string,
+  startUnix: number,
+  endUnix: number,
+  calendarId = "primary",
+): Promise<NylasEvent[]> {
+  // Nylas v3 requires calendar_id on the events endpoint.
   const data = await nylasFetch<{ data: NylasEvent[] }>(`/v3/grants/${grantId}/events`, {
+    calendar_id: calendarId,
     start: String(startUnix),
     end: String(endUnix),
-    limit: "100",
+    limit: "200",
   });
   return data?.data ?? [];
+}
+
+/** Nylas v3 hosted-OAuth URL to authorize a Google/Microsoft calendar. */
+export function nylasAuthUrl(redirectUri: string): string | null {
+  if (!env.NYLAS_CLIENT_ID) return null;
+  const u = new URL(`${env.NYLAS_API_URI}/v3/connect/auth`);
+  u.searchParams.set("client_id", env.NYLAS_CLIENT_ID);
+  u.searchParams.set("redirect_uri", redirectUri);
+  u.searchParams.set("response_type", "code");
+  u.searchParams.set("access_type", "offline");
+  return u.toString();
+}
+
+/** Exchange the OAuth code for a Nylas grant id (the calendar connection handle). */
+export async function nylasExchangeCode(
+  code: string,
+  redirectUri: string,
+): Promise<{ grantId: string; email: string | null } | null> {
+  if (!env.NYLAS_API_KEY || !env.NYLAS_CLIENT_ID) return null;
+  try {
+    const res = await fetch(`${env.NYLAS_API_URI}/v3/connect/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        client_id: env.NYLAS_CLIENT_ID,
+        client_secret: env.NYLAS_API_KEY,
+        redirect_uri: redirectUri,
+        grant_type: "authorization_code",
+        code,
+      }),
+    });
+    if (!res.ok) {
+      console.error(`[nylas] token exchange → ${res.status}`);
+      return null;
+    }
+    const data: any = await res.json();
+    if (!data?.grant_id) return null;
+    return { grantId: String(data.grant_id), email: data.email ?? null };
+  } catch (e) {
+    console.error("[nylas] exchangeCode", e);
+    return null;
+  }
 }

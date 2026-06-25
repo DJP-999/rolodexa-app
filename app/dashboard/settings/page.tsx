@@ -4,7 +4,14 @@ import { contacts, suggestions, jobRuns } from "@/db/schema";
 import { isConfigured } from "@/lib/env";
 import { getPrimaryUser, getUserContextRow, getConnectedAccount } from "@/lib/user";
 import { listAccounts } from "@/lib/integrations/unipile";
-import { saveContextAction, useAccount, disconnectAccount, connectNewAccount } from "./actions";
+import {
+  saveContextAction,
+  useAccount,
+  disconnectAccount,
+  connectNewAccount,
+  connectNylasCalendar,
+  disconnectNylasCalendar,
+} from "./actions";
 import { WeightsEditor } from "./WeightsEditor";
 import { JobsGrid, type Job } from "./JobsGrid";
 import { SaveButton } from "./SaveButton";
@@ -56,11 +63,12 @@ async function getData() {
   try {
     const user = await getPrimaryUser();
     if (!user) return null;
-    const [ctx, linkedin, email, telegram, accounts, runs, cs, pend] = await Promise.all([
+    const [ctx, linkedin, email, telegram, nylasCal, accounts, runs, cs, pend] = await Promise.all([
       getUserContextRow(user.id),
       getConnectedAccount(user.id, "linkedin"),
       getConnectedAccount(user.id, "email"),
       getConnectedAccount(user.id, "telegram"),
+      getConnectedAccount(user.id, "nylas_calendar"),
       listAccounts(),
       db.select().from(jobRuns).orderBy(desc(jobRuns.startedAt)).limit(80),
       db.select({ enrichedAt: contacts.enrichedAt }).from(contacts).where(eq(contacts.userId, user.id)),
@@ -80,6 +88,7 @@ async function getData() {
       linkedin,
       email,
       telegram,
+      nylasCal,
       accounts,
       last,
       total: cs.length,
@@ -153,10 +162,17 @@ function AccountPicker({
   );
 }
 
-export default async function SettingsPage() {
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ cal?: string }>;
+}) {
+  const sp = await searchParams;
   const data = await getData();
   const ctx = data?.ctx ?? null;
   const unipileOn = isConfigured("unipile");
+  const nylasOn = isConfigured("nylas");
+  const calConnected = data?.nylasCal?.externalId ?? null;
   const MESSAGING = ["LINKEDIN", "WHATSAPP", "INSTAGRAM", "MESSENGER", "TELEGRAM", "TWITTER", "MOBILE"];
   const accounts = data?.accounts ?? [];
   const linkedinAccounts = accounts.filter((a: any) => String(a?.type).toUpperCase() === "LINKEDIN");
@@ -211,6 +227,50 @@ export default async function SettingsPage() {
               </div>
             </div>
           </div>
+        )}
+      </Section>
+
+      <Section
+        title="Calendar (Nylas)"
+        desc="Connect your Google or Microsoft calendar through Nylas to power the Calendar tab and meeting KPIs — no Unipile changes needed."
+      >
+        {sp.cal === "connected" && (
+          <p className="mb-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+            Calendar connected. Your events are syncing now.
+          </p>
+        )}
+        {sp.cal === "error" && (
+          <p className="mb-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">
+            Couldn&apos;t connect the calendar. Check the Nylas app config and try again.
+          </p>
+        )}
+        {!nylasOn ? (
+          <p className="text-xs text-amber-600">
+            Set NYLAS_API_KEY and NYLAS_CLIENT_ID in Railway, and register{" "}
+            <code>/api/nylas/callback</code> as a redirect URI in your Nylas app (Google connector with
+            calendar scope).
+          </p>
+        ) : calConnected ? (
+          <div className="flex items-center justify-between gap-3 text-sm">
+            <span>
+              Connected
+              {data?.nylasCal?.metadata && typeof (data.nylasCal.metadata as any).email === "string" ? (
+                <span className="text-muted"> · {(data.nylasCal.metadata as any).email}</span>
+              ) : null}
+              <span className="text-good"> · syncing</span>
+            </span>
+            <form action={disconnectNylasCalendar}>
+              <button className="shrink-0 rounded-lg border border-hairline px-3 py-1.5 text-rose-500 hover:bg-rose-50">
+                Disconnect
+              </button>
+            </form>
+          </div>
+        ) : (
+          <form action={connectNylasCalendar}>
+            <button className="rounded-lg border border-hairline px-3 py-1.5 text-sm font-medium hover:bg-black/[0.03]">
+              Connect Google / Outlook calendar
+            </button>
+          </form>
         )}
       </Section>
 

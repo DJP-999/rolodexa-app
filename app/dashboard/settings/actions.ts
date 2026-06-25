@@ -19,6 +19,7 @@ import {
 } from "@/db/schema";
 import { getPrimaryUser, getConnectedAccount } from "@/lib/user";
 import { createHostedAuthLink } from "@/lib/integrations/unipile";
+import { nylasAuthUrl } from "@/lib/integrations/nylas";
 import { sendMessage } from "@/lib/integrations/telegram";
 import { enqueue, runOnce } from "@/worker/scheduler";
 
@@ -135,6 +136,26 @@ export async function connectNewAccount() {
     providers: ["GOOGLE", "OUTLOOK", "MAIL", "LINKEDIN"],
   });
   if (url) redirect(url);
+  revalidatePath("/dashboard/settings");
+}
+
+/** Start Nylas hosted OAuth to connect a Google/Microsoft calendar (no Unipile upgrade needed). */
+export async function connectNylasCalendar() {
+  const h = await headers();
+  const host = h.get("host") ?? "";
+  const base = host ? `https://${host}` : "";
+  const url = nylasAuthUrl(`${base}/api/nylas/callback`);
+  if (url) redirect(url);
+  revalidatePath("/dashboard/settings");
+}
+
+/** Disconnect the Nylas calendar grant. */
+export async function disconnectNylasCalendar() {
+  const user = await getPrimaryUser();
+  if (!user) return;
+  await db
+    .delete(connectedAccounts)
+    .where(and(eq(connectedAccounts.userId, user.id), eq(connectedAccounts.provider, "nylas_calendar")));
   revalidatePath("/dashboard/settings");
 }
 

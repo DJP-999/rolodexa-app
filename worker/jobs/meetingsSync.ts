@@ -16,12 +16,12 @@ export async function runMeetingsSync(): Promise<void> {
   const now = Date.now();
   let n = 0;
 
-  // --- Nylas calendar (email grant) ---
+  // --- Nylas calendar (dedicated calendar grant) ---
   if (isConfigured("nylas")) {
     const grants = await db
       .select()
       .from(connectedAccounts)
-      .where(eq(connectedAccounts.provider, "nylas_email"));
+      .where(eq(connectedAccounts.provider, "nylas_calendar"));
     for (const g of grants) {
       if (!g.externalId) continue;
       const self = await selfEmails(g.userId);
