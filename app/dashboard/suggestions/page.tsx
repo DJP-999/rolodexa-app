@@ -1,8 +1,8 @@
 import { desc, eq, inArray } from "drizzle-orm";
 import Link from "next/link";
-import { Sparkles, Check, Clock, X, Calendar, ExternalLink } from "lucide-react";
+import { Sparkles, Check, Clock, X, Calendar, ExternalLink, Linkedin, Mail } from "lucide-react";
 import { db } from "@/db";
-import { suggestions, contacts, claims, type Claim } from "@/db/schema";
+import { suggestions, contacts, claims, interactions, type Claim } from "@/db/schema";
 import { approveAction, snoozeAction, dismissAction, generateAction } from "./actions";
 import DraftEditor from "./DraftEditor";
 
@@ -81,11 +81,41 @@ async function getData(status: string) {
       return dated[0] ?? list[0];
     };
 
-    return sug.map((s) => ({
-      ...s,
-      contact: s.contactId ? map.get(s.contactId) : undefined,
-      whyNow: pickWhyNow(s.claimIds),
-    }));
+    // Most-recent interaction per contact → drives the resolved channel + "last interaction" context.
+    const cids = [...new Set(sug.map((s) => s.contactId).filter((x): x is string => !!x))];
+    const lastIx = new Map<string, { channel: string; occurredAt: Date; about: string | null }>();
+    if (cids.length) {
+      const ix = await db
+        .select()
+        .from(interactions)
+        .where(inArray(interactions.contactId, cids))
+        .orderBy(desc(interactions.occurredAt))
+        .limit(1000);
+      for (const i of ix) {
+        if (!i.contactId || lastIx.has(i.contactId)) continue;
+        const md = (i.metadata ?? {}) as { subject?: string; text?: string };
+        lastIx.set(i.contactId, { channel: i.channel, occurredAt: i.occurredAt, about: md.subject ?? md.text ?? null });
+      }
+    }
+    const channelFor = (c: typeof contacts.$inferSelect | undefined, last?: { channel: string }) => {
+      if (last?.channel === "linkedin") return "linkedin";
+      if (last?.channel === "nylas_email") return "email";
+      if (c?.linkedinMemberId) return "linkedin";
+      if (c?.email) return "email";
+      return null;
+    };
+
+    return sug.map((s) => {
+      const contact = s.contactId ? map.get(s.contactId) : undefined;
+      const last = s.contactId ? lastIx.get(s.contactId) : undefined;
+      return {
+        ...s,
+        contact,
+        whyNow: pickWhyNow(s.claimIds),
+        channel: channelFor(contact, last) as "linkedin" | "email" | null,
+        lastIx: last ?? null,
+      };
+    });
   } catch {
     return null;
   }
@@ -156,23 +186,68 @@ export default async function SuggestionsPage({
                     {t.glyph}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <span className="font-semibold text-ink">{s.contact?.name ?? "Contact"}</span>
                       <span
                         className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${PRIORITY[s.priority ?? "medium"]}`}
                       >
                         {s.priority}
                       </span>
+                      {s.channel === "linkedin" ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-700">
+                          <Linkedin className="h-3 w-3" /> LinkedIn
+                        </span>
+                      ) : s.channel === "email" ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-medium text-violet-700">
+                          <Mail className="h-3 w-3" /> Email
+                        </span>
+                      ) : (
+                        <span className="rounded-full bg-black/[0.05] px-2 py-0.5 text-[11px] text-muted">No channel</span>
+                      )}
                     </div>
                     <div className="text-xs text-muted">
                       {[s.contact?.role, s.contact?.company].filter(Boolean).join(" · ") || "—"}
                     </div>
+                    {/* Quick read on whether this outreach is worth it. */}
+                    {(() => {
+                      const fit = s.contact?.professionalFit;
+                      const rel = s.contact?.relevance;
+                      const last = s.lastIx;
+                      const days = last ? Math.floor((Date.now() - new Date(last.occurredAt).getTime()) / 86_400_000) : null;
+                      return (
+                        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted">
+                          {fit != null && (
+                            <span className="rounded bg-emerald-50 px-1.5 py-0.5 font-medium text-emerald-700">
+                              Fit {Math.round(fit * 100)}
+                            </span>
+                          )}
+                          {rel != null && (
+                            <span className="rounded bg-black/[0.05] px-1.5 py-0.5 font-medium text-ink/70">Relevance {rel}</span>
+                          )}
+                          {last ? (
+                            <span>
+                              · Last {fmtDate(last.occurredAt)} ({days}d ago)
+                              {last.about ? ` — ${last.about.slice(0, 60)}` : ""}
+                            </span>
+                          ) : (
+                            <span>· No prior interaction logged</span>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                   <div className="flex shrink-0 items-center gap-2 text-xs text-muted">
                     <span>{t.label}</span>
                     {s.score != null && <span>{Math.round(s.score * 100)}%</span>}
                   </div>
                 </div>
+
+                {/* Brief description of the contact / firm so you can judge at a glance. */}
+                {(() => {
+                  const pb = (s.contact?.pitchbookData ?? null) as Record<string, string> | null;
+                  const desc = s.contact?.summary || pb?.["Description"] || s.contact?.industry || null;
+                  return desc ? <p className="mt-2 text-xs italic text-muted">{desc.slice(0, 180)}</p> : null;
+                })()}
 
                 <p className="mt-3 text-sm text-ink">{s.reason}</p>
 

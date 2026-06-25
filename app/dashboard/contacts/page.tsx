@@ -143,7 +143,7 @@ export default async function ContactsPage({
     <div className="mx-auto max-w-6xl">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-[28px] font-bold tracking-tight">Contacts</h1>
+          <h1 className="text-[28px] font-bold tracking-tight">Rolodex</h1>
           <p className="mt-1 text-sm text-muted">{all?.length ?? 0} contacts</p>
         </div>
         <ContactControls />

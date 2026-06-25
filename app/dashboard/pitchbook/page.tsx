@@ -76,7 +76,7 @@ export default async function PitchbookPage({
     <div className="mx-auto max-w-[1400px]">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-[28px] font-bold tracking-tight">PitchBook</h1>
+          <h1 className="text-[28px] font-bold tracking-tight">Database</h1>
           <p className="mt-1 max-w-2xl text-sm text-muted">
             Reference firm data used to enrich your rolodex. These are <strong>not</strong> contacts — they never
             mix with your network, and only fill in firm intel where a contact&apos;s firm matches.

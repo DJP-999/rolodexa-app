@@ -2,7 +2,8 @@ import { desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { coldProspects, type ColdProspect } from "@/db/schema";
 import { getPrimaryUser } from "@/lib/user";
-import { promoteColdAction } from "./actions";
+import { isNoiseEmail } from "@/lib/sync/noise";
+import { promoteColdAction, blacklistColdAction } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -57,7 +58,7 @@ async function getProspects() {
 
 export default async function ColdOutreachPage() {
   const rows = await getProspects();
-  const list = rows ?? [];
+  const list = (rows ?? []).filter((p) => !isNoiseEmail(p.email));
   const counts = list.reduce<Record<string, number>>((a, p) => {
     const s = displayStatus(p);
     a[s] = (a[s] ?? 0) + 1;
@@ -129,17 +130,28 @@ export default async function ColdOutreachPage() {
                       <td className="px-3 py-3 text-[13px] text-muted">
                         {p.outboundCount ?? 0} / {p.inboundCount ?? 0}
                       </td>
-                      <td className="px-3 py-3 text-right">
-                        {p.status === "promoted" ? (
-                          <span className="text-xs text-muted">In rolodex</span>
-                        ) : (
-                          <form action={promoteColdAction}>
+                      <td className="px-3 py-3">
+                        <div className="flex items-center justify-end gap-1.5">
+                          {p.status === "promoted" ? (
+                            <span className="text-xs text-muted">In rolodex</span>
+                          ) : (
+                            <form action={promoteColdAction}>
+                              <input type="hidden" name="id" value={p.id} />
+                              <button className="rounded-lg border border-hairline px-2.5 py-1.5 text-xs font-medium text-ink hover:bg-black/[0.03]">
+                                Promote
+                              </button>
+                            </form>
+                          )}
+                          <form action={blacklistColdAction}>
                             <input type="hidden" name="id" value={p.id} />
-                            <button className="rounded-lg border border-hairline px-2.5 py-1.5 text-xs font-medium text-ink hover:bg-black/[0.03]">
-                              Promote
+                            <button
+                              title="Stop tracking this sender and remove it"
+                              className="rounded-lg border border-hairline px-2.5 py-1.5 text-xs font-medium text-muted hover:bg-rose-50 hover:text-rose-600"
+                            >
+                              Blacklist
                             </button>
                           </form>
-                        )}
+                        </div>
                       </td>
                     </tr>
                   );

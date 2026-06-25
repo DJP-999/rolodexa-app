@@ -5,6 +5,7 @@ import { isConfigured } from "@/lib/env";
 import { listRecentMessages } from "@/lib/integrations/nylas";
 import { getEmails, unipileConfigured } from "@/lib/integrations/unipile";
 import { logTouch, normEmail, selfEmails } from "@/lib/sync/track";
+import { cleanupNoiseProspects } from "@/lib/sync/noise";
 
 const LOOKBACK_MS = 2 * 60 * 60 * 1000; // 2h window; the unique index dedupes overlap.
 
@@ -105,5 +106,6 @@ export async function runEmailPoll(): Promise<void> {
     }
   }
 
-  console.log(`[emailPoll] processed ${inserted} message(s)`);
+  const removed = await cleanupNoiseProspects();
+  console.log(`[emailPoll] processed ${inserted} message(s); removed ${removed} noise prospect(s)`);
 }

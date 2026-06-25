@@ -1,6 +1,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { calendarEvents, coldProspects, connectedAccounts, contacts, interactions, users } from "@/db/schema";
+import { getBlacklist, isNoiseEmail } from "@/lib/sync/noise";
 
 /** The user's own address(es): their login email + every connected mailbox/calendar
  *  address. Used to tell inbound from outbound and to never treat the user as the
@@ -124,6 +125,11 @@ async function detectReply(t: TouchInput): Promise<boolean> {
  * Returns the contactId / coldProspectId it attributed to.
  */
 export async function logTouch(t: TouchInput): Promise<{ contactId: string | null; coldProspectId: string | null }> {
+  // Drop automated / marketing / blacklisted senders — they were never a real conversation.
+  const cpe = normEmail(t.counterpartyEmail);
+  if (cpe && !t.contactId && (isNoiseEmail(cpe) || (await getBlacklist(t.userId)).has(cpe))) {
+    return { contactId: null, coldProspectId: null };
+  }
   let contactId = t.contactId ?? null;
   if (!contactId) {
     contactId = await findContact(t.userId, { email: t.counterpartyEmail, memberId: t.counterpartyMemberId });
@@ -253,7 +259,7 @@ async function createColdFromMeeting(
   when: Date,
 ): Promise<string | null> {
   const key = normEmail(email);
-  if (!key) return null;
+  if (!key || isNoiseEmail(key)) return null;
   try {
     const row = (
       await db

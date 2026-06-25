@@ -24,6 +24,7 @@ export const userContext = pgTable("user_context", {
   writingStyleUpdatedAt: timestamp("writing_style_updated_at", { withTimezone: true }),
   fieldGroupings: jsonb("field_groupings").$type<Record<string, { label: string; categories: string[]; multi?: boolean }>>().default({}),
   weights: jsonb("weights").$type<{professional:number;recency:number;relationship:number;geographic:number;trigger:number;replyPropensity:number}>().default({professional:30,recency:25,relationship:20,geographic:15,trigger:10,replyPropensity:0}),
+  blacklistedEmails: jsonb("blacklisted_emails").$type<string[]>().default([]),
   observationUntil: date("observation_until"),
   maxNudgesPerDay: integer("max_nudges_per_day").default(3),
   gateConfidence: real("gate_confidence").default(0.6),

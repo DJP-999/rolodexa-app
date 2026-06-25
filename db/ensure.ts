@@ -104,5 +104,7 @@ export async function ensureSchema(sql: {
   )`);
   await sql.unsafe(`CREATE INDEX IF NOT EXISTS "cal_user_start_idx" ON "calendar_events" ("user_id","start_at")`);
   await sql.unsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "cal_source_uq" ON "calendar_events" ("user_id","source_ref")`);
+  // Manually blacklisted sender addresses (never tracked as conversations).
+  await sql.unsafe(`ALTER TABLE "user_context" ADD COLUMN IF NOT EXISTS "blacklisted_emails" jsonb DEFAULT '[]'::jsonb`);
   console.log("[db] ensureSchema applied.");
 }

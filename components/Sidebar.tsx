@@ -20,8 +20,7 @@ import {
 
 const NAV = [
   { label: "Home", href: "/dashboard", Icon: Home },
-  { label: "Contacts", href: "/dashboard/contacts", Icon: Users },
-  { label: "PitchBook", href: "/dashboard/pitchbook", Icon: Database },
+  { label: "Rolodex", href: "/dashboard/contacts", Icon: Users },
   { label: "Calendar", href: "/dashboard/calendar", Icon: Calendar },
   { label: "Map", href: "/dashboard/map", Icon: MapIcon },
   { label: "KPI Tracking", href: "/dashboard/kpi", Icon: BarChart3 },
@@ -29,6 +28,7 @@ const NAV = [
   { label: "Projects", href: "/dashboard/projects", Icon: Briefcase },
   { label: "Suggestions", href: "/dashboard/suggestions", Icon: Bell },
   { label: "Automations", href: "/dashboard/automations", Icon: AlarmClock },
+  { label: "Database", href: "/dashboard/pitchbook", Icon: Database },
   { label: "Settings", href: "/dashboard/settings", Icon: Settings },
 ];
 
