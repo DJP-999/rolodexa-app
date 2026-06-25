@@ -63,6 +63,12 @@ export async function runFitGrade(): Promise<void> {
           Region: nf["Region"],
           Interests: nf["Interests"],
           Stage: nf["Stage"],
+          // Intel parsed from meeting notes — the strongest thesis signal we have.
+          "Deal Interest": cf["Deal Interest"],
+          Sectors: cf["Sectors"],
+          Portfolio: cf["Portfolio"],
+          "Targets / wants": cf["Targets"],
+          "Deal Structure": cf["Deal Structure"],
         },
         pitchbook: (c.pitchbookData ?? null) as Record<string, string> | null,
         profile: pd
