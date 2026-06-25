@@ -67,17 +67,18 @@ function dossier(c: FitInput): string {
 export async function gradeFitBatch(batch: FitInput[], focus: UserFocus): Promise<FitResult[]> {
   if (!batch.length) return [];
   const system =
-    "You score how relevant each professional contact is to a specific dealmaker, 0.0 to 1.0.\n" +
+    "You score how relevant each professional contact is to a specific dealmaker, 0.0 to 1.0, based STRICTLY on the dealmaker's stated focus below — NOT on generic 'private markets' adjacency.\n" +
     "THE DEALMAKER:\n" +
     `- Role: ${focus.role ?? "placement agent / dealmaker in private markets"}\n` +
-    `- Focus: ${focus.currentFocus ?? "brokering pre-IPO secondaries and raising capital for lower-middle-market buyouts; relationship-first work with capital allocators and family offices"}\n` +
-    (focus.activeProjects ? `- Active deals: ${focus.activeProjects}\n` : "") +
-    "Score by DOMAIN/THESIS FIT and how valuable the relationship is to THIS dealmaker. Reason explicitly about the contact's FIRM — what it does, what it invests in, and its standing — and the person's seniority.\n" +
-    "HIGH (0.8-1.0): senior/prominent people at secondaries firms (GP-led & LP secondaries), fund-of-funds, large family offices and other capital allocators, LPs, PE/growth investors active in secondaries or LMM buyouts, secondaries/placement advisors, and well-known check-writers aligned with this focus.\n" +
-    "MEDIUM (0.4-0.7): adjacent private-markets professionals (VCs, investment bankers, fund lawyers, founders) with plausible relevance.\n" +
-    "LOW (0.0-0.3): unrelated fields, no signal of relevance, or clearly off-thesis.\n" +
-    "Use what you know about NAMED firms (e.g. major secondaries and PE shops). When data is thin, infer conservatively from the firm and role rather than defaulting to the middle.\n" +
-    'Return ONLY JSON {"items":[{"id":"<id>","fit":0.0,"summary":"one line: what they do / invest in","rationale":"why this score, naming the firm and thesis"}]}.';
+    `- Focus: ${focus.currentFocus ?? "brokering secondaries and raising capital from allocators and family offices"}\n` +
+    (focus.activeProjects ? `- Active deals / mandates: ${focus.activeProjects}\n` : "") +
+    "Reason about the contact's FIRM (its strategy — what it does and what it invests in — and its standing) and the person's seniority, then score how DIRECTLY they serve the dealmaker's SPECIFIC stated focus and active mandates above.\n" +
+    "HIGH (0.8-1.0): a direct, on-thesis counterparty or capital source for the stated focus — their firm's strategy and mandate clearly match what the dealmaker is brokering or raising for, and they are senior enough to act. (For a VC-secondaries focus, that means secondaries buyers/funds, GP-led & LP secondaries investors, and the family offices / RIAs / LPs / allocators who back or buy that exposure.)\n" +
+    "MEDIUM (0.4-0.7): plausibly useful but NOT directly on-thesis — an investor in a DIFFERENT strategy, a service provider, an adjacent operator, or a junior person at an otherwise on-thesis firm.\n" +
+    "LOW (0.0-0.3): unrelated to the stated focus.\n" +
+    "CRITICAL: do NOT score an off-thesis firm HIGH just because it is in private markets. If the focus is VC secondaries, then a control/buyout or lower-middle-market PE fund, an unrelated VC, a private-credit shop, or an operating company is MEDIUM at best — not high. Tie every score to the SPECIFIC stated focus and mandates.\n" +
+    "Use what you know about named firms. When data is thin, infer conservatively from the firm and role rather than defaulting to the middle.\n" +
+    'Return ONLY JSON {"items":[{"id":"<id>","fit":0.0,"summary":"one line: what they do / invest in","rationale":"why this score, naming the firm and how its strategy relates to the stated focus"}]}.';
   const raw = await complete({
     tier: "cheap",
     system,
