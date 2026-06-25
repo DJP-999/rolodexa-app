@@ -4,6 +4,7 @@ import { ArrowLeft, Mail, MapPin, ExternalLink, Briefcase, Newspaper, Activity, 
 import { getContactProfile } from "@/lib/contactProfile";
 import DeleteContactButton from "../DeleteContactButton";
 import VipToggle from "../VipToggle";
+import ContactEditForm from "./ContactEditForm";
 
 export const dynamic = "force-dynamic";
 
@@ -111,6 +112,20 @@ export default async function ContactProfile({ params }: { params: Promise<{ id:
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          <ContactEditForm
+            id={c.id}
+            initial={{
+              name: c.name ?? "",
+              email: c.email ?? "",
+              company: c.company ?? "",
+              role: c.role ?? "",
+              location: c.location ?? "",
+              industry: c.industry ?? "",
+              linkedinUrl: c.linkedinUrl ?? "",
+              relationship: c.relationship ?? "other",
+              summary: c.summary ?? "",
+            }}
+          />
           <VipToggle id={c.id} initial={!!c.highValue} />
           <DeleteContactButton id={c.id} name={c.name} />
         </div>

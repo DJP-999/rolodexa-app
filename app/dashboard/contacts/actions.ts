@@ -239,6 +239,52 @@ export async function setHighValueAction(id: string, value: boolean) {
 }
 
 /** Permanently delete a contact (and its cascading claims/suggestions). Scoped to the owner. */
+/** Manually edit a contact's core fields. Empty strings clear a field (except name). */
+export async function updateContactAction(
+  id: string,
+  v: {
+    name?: string;
+    email?: string;
+    company?: string;
+    role?: string;
+    location?: string;
+    industry?: string;
+    linkedinUrl?: string;
+    relationship?: string;
+    summary?: string;
+  },
+): Promise<{ ok: boolean }> {
+  const user = await getPrimaryUser();
+  if (!user || !id) return { ok: false };
+  const owned = (
+    await db
+      .select({ id: contacts.id })
+      .from(contacts)
+      .where(and(eq(contacts.id, id), eq(contacts.userId, user.id)))
+      .limit(1)
+  )[0];
+  if (!owned) return { ok: false };
+
+  const upd: Partial<typeof contacts.$inferInsert> = {};
+  const clean = (s?: string) => (s ?? "").trim();
+  if (v.name !== undefined && clean(v.name)) upd.name = clean(v.name).slice(0, 200);
+  if (v.email !== undefined) upd.email = clean(v.email).toLowerCase() || null;
+  if (v.company !== undefined) upd.company = clean(v.company) || null;
+  if (v.role !== undefined) upd.role = clean(v.role) || null;
+  if (v.location !== undefined) upd.location = clean(v.location) || null;
+  if (v.industry !== undefined) upd.industry = clean(v.industry) || null;
+  if (v.linkedinUrl !== undefined) upd.linkedinUrl = clean(v.linkedinUrl) || null;
+  if (v.summary !== undefined) upd.summary = clean(v.summary) || null;
+  const REL = ["investor", "friend", "coworker", "vendor", "family", "other"];
+  if (v.relationship && REL.includes(v.relationship))
+    upd.relationship = v.relationship as typeof contacts.$inferInsert["relationship"];
+
+  if (Object.keys(upd).length) await db.update(contacts).set(upd).where(eq(contacts.id, id));
+  revalidatePath(`/dashboard/contacts/${id}`);
+  revalidatePath("/dashboard/contacts");
+  return { ok: true };
+}
+
 export async function deleteContactAction(id: string) {
   if (!id) return;
   const user = await getPrimaryUser();

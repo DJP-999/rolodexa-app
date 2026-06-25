@@ -13,6 +13,7 @@ type Extracted = {
   portfolio?: string[];
   targets?: string[];
   dealStructure?: string | null;
+  dealInterest?: string | null;
   summary?: string | null;
 };
 
@@ -30,10 +31,13 @@ export async function interpretMeetingNotes(notes: string): Promise<Extracted | 
       "when not stated. Return STRICT JSON only (no prose), with this exact shape: " +
       '{"location":string|null,"relationship":"investor"|"friend"|"coworker"|"vendor"|"family"|"other"|null,' +
       '"company":string|null,"role":string|null,"industry":string|null,"sectors":string[],"portfolio":string[],' +
-      '"targets":string[],"dealStructure":string|null,"summary":string}. ' +
+      '"targets":string[],"dealStructure":string|null,"dealInterest":string|null,"summary":string}. ' +
       "Definitions: industry = the firm type (e.g. 'Venture Capital'); sectors = focus areas/verticals; " +
       "portfolio = companies they have invested in; targets = companies or people they want to meet or invest in; " +
       "dealStructure = how they invest or structure deals (e.g. SPVs, L1 vehicles, direct); " +
+      "dealInterest = whether they invest in secondaries, primaries, or both. " +
+      "IMPORTANT HEURISTIC: if they are looking for / want to get into SPECIFIC NAMED COMPANIES (i.e. there are concrete target companies), " +
+      "that strongly signals interest in SECONDARIES (buying existing shares) — set dealInterest to 'Secondaries' in that case. " +
       "summary = a 1–2 sentence synthesis. relationship = best single category for this person.",
     messages: [{ role: "user", content: `Notes:\n${text}\n\nJSON:` }],
     maxTokens: 600,
@@ -81,6 +85,9 @@ export async function applyMeetingNotes(contactId: string, notes: string): Promi
     if (portfolio) cf["Portfolio"] = portfolio.slice(0, 500);
     if (targets) cf["Targets"] = targets.slice(0, 500);
     if (ex.dealStructure) cf["Deal Structure"] = ex.dealStructure.slice(0, 300);
+    // Seeking specific named companies → secondaries interest, even if not stated outright.
+    const dealInterest = ex.dealInterest || (targets ? "Secondaries" : "");
+    if (dealInterest) cf["Deal Interest"] = dealInterest.slice(0, 120);
   }
   upd.customFields = cf;
   await db.update(contacts).set(upd).where(eq(contacts.id, contactId));
