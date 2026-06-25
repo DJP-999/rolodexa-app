@@ -72,6 +72,12 @@ export function ContactsFilters({ enriched }: { enriched: number }) {
         >
           Enriched <span className="chip">{enriched}</span>
         </span>
+        <span className={pill(tab === "new")} onClick={() => update("tab", "new")} title="Added in the last 7 days">
+          New
+        </span>
+        <span className={pill(tab === "recent")} onClick={() => update("tab", "recent")} title="Interacted with in the last 7 days">
+          Recent
+        </span>
         <span className={pill(tab === "needs")} onClick={() => update("tab", "needs")}>
           Needs Context
         </span>

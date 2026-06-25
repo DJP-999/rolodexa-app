@@ -2,7 +2,8 @@
 
 import { Fragment, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { ChevronDown, ArrowRight, Loader2, SlidersHorizontal } from "lucide-react";
+import { ChevronDown, ArrowRight, Loader2, SlidersHorizontal, Pencil } from "lucide-react";
+import DeleteContactButton from "./DeleteContactButton";
 
 export type Row = {
   id: string;
@@ -46,6 +47,7 @@ const DEFAULT_VISIBLE = ["company", "email", "linkedin", "industry", "relationsh
 const STORAGE_KEY = "rolodexa.contactCols";
 const ORDER_KEY = "rolodexa.contactOrder";
 const SORT_KEY = "rolodexa.contactSort";
+const LABELS_KEY = "rolodexa.contactLabels";
 
 const REL_BADGE: Record<string, string> = {
   investor: "bg-violet-100 text-violet-700",
@@ -113,12 +115,15 @@ function Summary({ d, id }: { d: any; id: string }) {
         </div>
       </div>
       {d.pitchbook && Object.keys(d.pitchbook).length > 0 && <PitchbookProfile pb={d.pitchbook} />}
-      <Link
-        href={`/dashboard/contacts/${id}`}
-        className="inline-flex items-center gap-1 text-[#2d6cf6] hover:underline"
-      >
-        View full profile <ArrowRight className="h-3.5 w-3.5" />
-      </Link>
+      <div className="flex items-center justify-between gap-3 pt-1">
+        <Link
+          href={`/dashboard/contacts/${id}`}
+          className="inline-flex items-center gap-1 text-[#2d6cf6] hover:underline"
+        >
+          View full profile <ArrowRight className="h-3.5 w-3.5" />
+        </Link>
+        <DeleteContactButton id={id} name={d.name ?? "this contact"} />
+      </div>
     </div>
   );
 }
@@ -201,6 +206,7 @@ export function ContactsTable({
   const [dragKey, setDragKey] = useState<string | null>(null);
   const [facetSel, setFacetSel] = useState<Record<string, string>>({});
   const [picker, setPicker] = useState(false);
+  const [labels, setLabels] = useState<Record<string, string>>({});
   const [open, setOpen] = useState<string | null>(null);
   const [data, setData] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState<string | null>(null);
@@ -252,10 +258,27 @@ export function ContactsTable({
       if (ord) setOrder(JSON.parse(ord));
       const s = localStorage.getItem(SORT_KEY);
       if (s) setSort(JSON.parse(s));
+      const lb = localStorage.getItem(LABELS_KEY);
+      if (lb) setLabels(JSON.parse(lb));
     } catch {
       /* ignore */
     }
   }, []);
+
+  const labelOf = (c: { key: string; label: string }) => labels[c.key] ?? c.label;
+  const renameCol = (key: string, current: string) => {
+    const v = window.prompt("Rename column", current);
+    if (v === null) return;
+    const next = { ...labels };
+    if (v.trim()) next[key] = v.trim();
+    else delete next[key];
+    setLabels(next);
+    try {
+      localStorage.setItem(LABELS_KEY, JSON.stringify(next));
+    } catch {
+      /* ignore */
+    }
+  };
 
   const persistOrder = (next: string[]) => {
     setOrder(next);
@@ -535,18 +558,28 @@ export function ContactsTable({
                 {allCols
                   .filter((c) => c.key !== PINNED)
                   .map((c) => (
-                  <label
+                  <div
                     key={c.key}
-                    className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-black/[0.03]"
+                    className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-black/[0.03]"
                   >
-                    <input
-                      type="checkbox"
-                      checked={visible.includes(c.key)}
-                      onChange={() => toggleCol(c.key)}
-                    />
-                    <span className="text-ink">{c.label}</span>
-                    {c.custom && <span className="text-[10px] text-muted">CSV</span>}
-                  </label>
+                    <label className="flex flex-1 cursor-pointer items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={visible.includes(c.key)}
+                        onChange={() => toggleCol(c.key)}
+                      />
+                      <span className="text-ink">{labelOf(c)}</span>
+                      {c.custom && <span className="text-[10px] text-muted">CSV</span>}
+                    </label>
+                    <button
+                      type="button"
+                      title="Rename column"
+                      onClick={() => renameCol(c.key, labelOf(c))}
+                      className="shrink-0 rounded p-1 text-muted hover:bg-black/[0.06] hover:text-ink"
+                    >
+                      <Pencil className="h-3 w-3" />
+                    </button>
+                  </div>
                 ))}
               </div>
             </div>
@@ -575,7 +608,7 @@ export function ContactsTable({
                   title="Click to sort · drag to reorder"
                   className="cursor-pointer select-none whitespace-nowrap px-3 py-3 font-normal hover:text-ink"
                 >
-                  {c.label}
+                  {labelOf(c)}
                   {sort?.key === c.key ? (sort.dir === "asc" ? " ↑" : " ↓") : ""}
                 </th>
               ))}

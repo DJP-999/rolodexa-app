@@ -9,6 +9,8 @@ import { ContactsTable } from "./ContactsTable";
 
 export const dynamic = "force-dynamic";
 
+const WEEK_MS = 7 * 86_400_000;
+
 async function getContacts() {
   try {
     return await db
@@ -78,6 +80,11 @@ export default async function ContactsPage({
     if (rel && (c.relationship ?? "other") !== rel) return false;
     if (tab === "enriched" && !c.enrichedAt) return false;
     if (tab === "needs" && c.relevance != null) return false;
+    // New = added to the rolodex in the last 7 days (met-and-promoted or manually added).
+    if (tab === "new" && !(c.createdAt && Date.now() - new Date(c.createdAt).getTime() <= WEEK_MS)) return false;
+    // Recent = met with or messaged (email/LinkedIn) in the last 7 days.
+    if (tab === "recent" && !(c.lastContactedAt && Date.now() - new Date(c.lastContactedAt).getTime() <= WEEK_MS))
+      return false;
     return true;
   });
 
