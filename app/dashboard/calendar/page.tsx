@@ -22,6 +22,7 @@ async function getEvents(userId: string): Promise<EventVM[]> {
         held: calendarEvents.held,
         notes: calendarEvents.notes,
         matchedContactId: calendarEvents.matchedContactId,
+        coldProspectId: calendarEvents.coldProspectId,
         contactName: contacts.name,
       })
       .from(calendarEvents)
@@ -40,6 +41,7 @@ async function getEvents(userId: string): Promise<EventVM[]> {
       held: r.held,
       notes: r.notes,
       contactId: r.matchedContactId,
+      coldProspectId: r.coldProspectId,
       contactName: r.contactName,
     }));
   } catch {

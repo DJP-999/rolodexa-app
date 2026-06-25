@@ -2,12 +2,22 @@ import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { calendarEvents, coldProspects, contacts, interactions, users } from "@/db/schema";
 
-/** The user's own email address(es) — used to tell inbound from outbound mail. */
+/** The user's own address(es): their login email + every connected mailbox/calendar
+ *  address. Used to tell inbound from outbound and to never treat the user as the
+ *  counterparty on their own meetings. */
 export async function selfEmails(userId: string): Promise<Set<string>> {
   const set = new Set<string>();
   try {
     const u = (await db.select({ email: users.email }).from(users).where(eq(users.id, userId)).limit(1))[0];
-    if (u?.email) set.add(u.email.toLowerCase().trim());
+    if (u?.email) set.add(normEmail(u.email));
+    const accts = await db
+      .select({ metadata: connectedAccounts.metadata })
+      .from(connectedAccounts)
+      .where(eq(connectedAccounts.userId, userId));
+    for (const a of accts) {
+      const m = (a.metadata ?? {}) as { email?: string };
+      if (m.email) set.add(normEmail(m.email));
+    }
   } catch {
     /* ignore */
   }
@@ -216,20 +226,55 @@ export async function upsertColdProspect(t: TouchInput): Promise<string | null> 
   }
 }
 
-/** Existing cold prospect (by email) — used to react to a calendar meeting, never to create one. */
-async function findColdProspect(userId: string, email: string): Promise<string | null> {
+/** Existing cold prospect (by email), full row — to react to a calendar meeting. */
+async function findColdProspect(userId: string, email: string) {
   const e = normEmail(email);
   if (!e) return null;
   try {
-    const c = (
-      await db
-        .select({ id: coldProspects.id })
-        .from(coldProspects)
-        .where(and(eq(coldProspects.userId, userId), sql`lower(${coldProspects.email}) = ${e}`))
-        .limit(1)
-    )[0];
-    return c?.id ?? null;
+    return (
+      (
+        await db
+          .select()
+          .from(coldProspects)
+          .where(and(eq(coldProspects.userId, userId), sql`lower(${coldProspects.email}) = ${e}`))
+          .limit(1)
+      )[0] ?? null
+    );
   } catch {
+    return null;
+  }
+}
+
+/** Create a cold-pipeline profile for a meeting attendee who isn't in the rolodex yet. */
+async function createColdFromMeeting(
+  userId: string,
+  email: string,
+  name: string | null,
+  when: Date,
+): Promise<string | null> {
+  const key = normEmail(email);
+  if (!key) return null;
+  try {
+    const row = (
+      await db
+        .insert(coldProspects)
+        .values({
+          userId,
+          name: name ?? null,
+          email: key,
+          identityKey: key,
+          channel: "nylas_calendar",
+          status: "meeting_set",
+          meetingAt: when,
+        })
+        .onConflictDoNothing()
+        .returning({ id: coldProspects.id })
+    )[0];
+    if (row) return row.id;
+    const existing = await findColdProspect(userId, key);
+    return existing?.id ?? null;
+  } catch (e) {
+    console.error("[track] createColdFromMeeting", e);
     return null;
   }
 }
@@ -265,12 +310,19 @@ export async function upsertCalendarEvent(ev: CalEventInput): Promise<void> {
     if (!matchedContactId) {
       const cp = await findColdProspect(ev.userId, primary.email);
       if (cp) {
-        coldId = cp;
-        await db
-          .update(coldProspects)
-          .set({ status: "meeting_set", meetingAt: ev.startAt, updatedAt: new Date() })
-          .where(eq(coldProspects.id, cp));
-        matchedContactId = await promoteColdProspect(cp);
+        coldId = cp.id;
+        // A booked meeting marks them meeting_set but never promotes — promotion happens
+        // only once you confirm you actually met (held = yes) or promote manually.
+        if (cp.status !== "promoted") {
+          await db
+            .update(coldProspects)
+            .set({ status: "meeting_set", meetingAt: ev.startAt, updatedAt: new Date() })
+            .where(eq(coldProspects.id, cp.id));
+        } else if (cp.promotedContactId) {
+          matchedContactId = cp.promotedContactId; // already a contact → link the event
+        }
+      } else {
+        coldId = await createColdFromMeeting(ev.userId, primary.email, primary.name, ev.startAt);
       }
     }
   }
@@ -311,6 +363,11 @@ export async function upsertCalendarEvent(ev: CalEventInput): Promise<void> {
   }
 
   // Mirror a meeting touch onto the contact timeline so "last meeting" stays accurate.
+  // Delete-then-insert so a re-sync re-points events that were previously mis-matched
+  // (e.g. to yourself) to the correct contact — or to nobody.
+  await db
+    .delete(interactions)
+    .where(and(eq(interactions.userId, ev.userId), eq(interactions.sourceRef, `cal-${ev.sourceRef}`)));
   if (matchedContactId) {
     await db
       .insert(interactions)

@@ -16,6 +16,7 @@ export type EventVM = {
   held: boolean | null;
   notes: string | null;
   contactId: string | null;
+  coldProspectId: string | null;
   contactName: string | null;
 };
 
@@ -173,7 +174,11 @@ export function CalendarWeek({ events }: { events: EventVM[] }) {
                     key={e.id}
                     onClick={() => setSelId(e.id)}
                     className={`block w-full truncate rounded px-1.5 py-0.5 text-left text-[11px] ${
-                      e.contactId ? "bg-indigo-100 text-indigo-700" : "bg-black/[0.06] text-ink/70"
+                      e.contactId
+                        ? "bg-indigo-100 text-indigo-700"
+                        : e.coldProspectId
+                          ? "bg-amber-100 text-amber-700"
+                          : "bg-black/[0.06] text-ink/70"
                     }`}
                   >
                     {e.title}
@@ -220,25 +225,29 @@ export function CalendarWeek({ events }: { events: EventVM[] }) {
                       : 50;
                     const top = Math.max(0, ((sm - START_HOUR * 60) / 60) * HOUR_H);
                     const height = Math.min(GRID_H - top, Math.max(20, (durMin / 60) * HOUR_H));
-                    const people = !!e.contactId;
+                    const tone = e.contactId ? "contact" : e.coldProspectId ? "cold" : "plain";
                     const held = heldOf(e);
+                    const box =
+                      tone === "contact"
+                        ? "border-indigo-200 bg-indigo-50 hover:bg-indigo-100"
+                        : tone === "cold"
+                          ? "border-amber-200 bg-amber-50 hover:bg-amber-100"
+                          : "border-hairline bg-white hover:bg-black/[0.03]";
+                    const titleColor =
+                      tone === "contact" ? "text-indigo-800" : tone === "cold" ? "text-amber-800" : "text-ink";
                     return (
                       <button
                         key={e.id}
                         onClick={() => setSelId(e.id)}
-                        className={`absolute left-0.5 right-0.5 overflow-hidden rounded-md border px-1.5 py-1 text-left ${
-                          people
-                            ? "border-indigo-200 bg-indigo-50 hover:bg-indigo-100"
-                            : "border-hairline bg-white hover:bg-black/[0.03]"
-                        } ${selId === e.id ? "ring-2 ring-[#2d6cf6]" : ""}`}
+                        className={`absolute left-0.5 right-0.5 overflow-hidden rounded-md border px-1.5 py-1 text-left ${box} ${
+                          selId === e.id ? "ring-2 ring-[#2d6cf6]" : ""
+                        }`}
                         style={{ top, height }}
                       >
                         <div className="flex items-center gap-1">
                           {held === true && <Check className="h-3 w-3 shrink-0 text-emerald-600" />}
                           {held === false && <Ban className="h-3 w-3 shrink-0 text-rose-500" />}
-                          <span className={`truncate text-[11px] font-medium ${people ? "text-indigo-800" : "text-ink"}`}>
-                            {e.title}
-                          </span>
+                          <span className={`truncate text-[11px] font-medium ${titleColor}`}>{e.title}</span>
                         </div>
                         {height > 30 && <div className="truncate text-[10px] text-muted">{fmtTime(e.startISO)}</div>}
                       </button>
@@ -269,6 +278,10 @@ export function CalendarWeek({ events }: { events: EventVM[] }) {
           {sel.contactId ? (
             <Link href={`/dashboard/contacts/${sel.contactId}`} className="mt-2 inline-block text-sm text-[#2d6cf6] hover:underline">
               {sel.contactName ?? "View contact"} →
+            </Link>
+          ) : sel.coldProspectId ? (
+            <Link href="/dashboard/cold-outreach" className="mt-2 inline-block text-sm text-amber-700 hover:underline">
+              {sel.attendees[0]?.name || sel.attendees[0]?.email || "Prospect"} · in Cold Outreach →
             </Link>
           ) : sel.attendees.length > 0 ? (
             <p className="mt-2 text-xs text-muted">With: {sel.attendees.map((a) => a.name || a.email).slice(0, 4).join(", ")}</p>
