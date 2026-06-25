@@ -27,6 +27,20 @@ const FIELD_MAP: [string, RegExp[], number][] = [
   ["Last Investment Class", [/^last investment class$/i], 80],
 ];
 
+// Generic firm-name words stripped to get a "core" key, so "3Spoke Capital" matches a
+// contact at "3SPOKE", "OnePrime Capital" matches "OnePrime", etc.
+const GENERIC = new Set([
+  "capital", "partners", "partner", "ventures", "venture", "management", "mgmt", "advisors",
+  "advisers", "advisory", "group", "holdings", "holding", "fund", "funds", "investments",
+  "investment", "equity", "asset", "assets", "financial", "global", "associates", "company",
+]);
+function coreKey(name: string): string {
+  return firmPhrase(name)
+    .split(" ")
+    .filter((t) => t && !GENERIC.has(t))
+    .join(" ");
+}
+
 /** Pull the essential PitchBook firm fields onto clean labels (matched by exact header). */
 function deriveFirmFields(cf: Record<string, string>): Record<string, string> {
   const entries = Object.entries(cf);
@@ -55,24 +69,34 @@ export async function runPitchbookSync(): Promise<void> {
     return;
   }
 
-  // 1) Normalize each firm's fields (idempotent rewrite).
-  const byUserKey = new Map<string, Record<string, string>>();
+  // 1) Normalize each firm's fields (idempotent rewrite) + build exact and core match maps.
+  const exactMap = new Map<string, Record<string, string>>();
+  const coreMap = new Map<string, Record<string, string>>();
   for (const f of firms) {
     const cf = (f.customFields ?? {}) as Record<string, string>;
     const nf = deriveFirmFields(cf);
     if (JSON.stringify(nf) !== JSON.stringify(f.normalizedFields ?? {})) {
       await db.update(pitchbookFirms).set({ normalizedFields: nf }).where(eq(pitchbookFirms.id, f.id));
     }
-    byUserKey.set(`${f.userId}:${f.nameKey}`, nf);
+    if (!Object.keys(nf).length) continue;
+    exactMap.set(`${f.userId}:${f.nameKey}`, nf);
+    const ck = coreKey(f.name);
+    if (ck.length >= 3 && !coreMap.has(`${f.userId}:${ck}`)) coreMap.set(`${f.userId}:${ck}`, nf);
   }
 
-  // 2) Match contacts to firms by normalized company name; write pitchbookData.
+  // 2) Match contacts to firms (exact firm name, then a generic-suffix-stripped core).
   const all = await db.select({ id: contacts.id, userId: contacts.userId, company: contacts.company }).from(contacts);
   let matched = 0;
   const updates: { id: string; data: Record<string, string> | null }[] = [];
   for (const c of all) {
-    const key = c.company ? `${c.userId}:${firmPhrase(c.company)}` : null;
-    const nf = key ? byUserKey.get(key) : undefined;
+    let nf: Record<string, string> | undefined;
+    if (c.company) {
+      nf = exactMap.get(`${c.userId}:${firmPhrase(c.company)}`);
+      if (!nf) {
+        const ck = coreKey(c.company);
+        if (ck.length >= 3) nf = coreMap.get(`${c.userId}:${ck}`);
+      }
+    }
     updates.push({ id: c.id, data: nf && Object.keys(nf).length ? nf : null });
     if (nf) matched++;
   }
