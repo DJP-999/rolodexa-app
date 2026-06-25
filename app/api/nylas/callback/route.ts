@@ -11,7 +11,12 @@ export const dynamic = "force-dynamic";
 /** Nylas v3 OAuth callback — exchanges the code for a grant and stores the calendar connection. */
 export async function GET(req: Request): Promise<Response> {
   const url = new URL(req.url);
-  const base = `${url.protocol}//${url.host}`;
+  // On Railway the request URL is the internal host (localhost:8080); use the forwarded
+  // public host so the redirect_uri matches the one auth started with, and the browser
+  // redirect lands on the real domain.
+  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? url.host;
+  const proto = req.headers.get("x-forwarded-proto") ?? "https";
+  const base = `${proto}://${host}`;
   const code = url.searchParams.get("code");
   const settings = `${base}/dashboard/settings`;
   if (!code) return NextResponse.redirect(`${settings}?cal=error`);
