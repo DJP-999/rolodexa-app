@@ -72,6 +72,7 @@ export function nylasAuthUrl(redirectUri: string): string | null {
   u.searchParams.set("client_id", env.NYLAS_CLIENT_ID);
   u.searchParams.set("redirect_uri", redirectUri);
   u.searchParams.set("response_type", "code");
+  u.searchParams.set("provider", "google");
   u.searchParams.set("access_type", "offline");
   return u.toString();
 }
