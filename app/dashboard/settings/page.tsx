@@ -32,6 +32,7 @@ const TIMEZONES: [string, string][] = [
 ];
 
 const JOB_META: [string, string, string][] = [
+  ["split-contacts", "Split multi-person rows", "1:30 AM"],
   ["enrichment", "Enrichment", "2:00 AM"],
   ["fit-grade", "Score domain fit", "3:30 AM"],
   ["recompute", "Re-grade relevance", "4:00 AM"],
