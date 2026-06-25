@@ -6,6 +6,7 @@ import { getPrimaryUser } from "@/lib/user";
 import { ContactControls } from "./ContactControls";
 import { ContactsFilters } from "./ContactsFilters";
 import { ContactsTable } from "./ContactsTable";
+import { RolodexProgress } from "./RolodexProgress";
 
 export const dynamic = "force-dynamic";
 
@@ -163,6 +164,7 @@ export default async function ContactsPage({
         <div>
           <h1 className="text-[28px] font-bold tracking-tight">Rolodex</h1>
           <p className="mt-1 text-sm text-muted">{all?.length ?? 0} contacts</p>
+          <RolodexProgress />
         </div>
         <ContactControls />
       </div>
