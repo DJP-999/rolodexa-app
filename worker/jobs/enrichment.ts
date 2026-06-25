@@ -822,7 +822,9 @@ export async function runEnrichment(): Promise<void> {
 
     const emailId = await accountId(userId, "email");
     if (emailId) await syncEmail(userId, emailId);
-    if (emailId) await syncCalendar(userId, emailId);
+    // Calendar sync is dormant until the Unipile API key is granted calendar scope.
+    // Re-enable by uncommenting: if (emailId) await syncCalendar(userId, emailId);
+    void syncCalendar;
 
     await deriveWritingStyle(userId);
     await categorizeUser(userId);
