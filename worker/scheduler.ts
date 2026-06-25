@@ -5,6 +5,9 @@ import { db } from "@/db";
 import { jobRuns, automations } from "@/db/schema";
 import { env } from "@/lib/env";
 import { runEmailPoll } from "./jobs/emailPoll";
+import { runLinkedinPoll } from "./jobs/linkedinPoll";
+import { runMeetingsSync } from "./jobs/meetingsSync";
+import { runKpiAnalyze } from "./jobs/kpiAnalyze";
 import { runEnrichment } from "./jobs/enrichment";
 import { runRecompute } from "./jobs/recompute";
 import { runFitGrade } from "./jobs/fitGrade";
@@ -29,6 +32,9 @@ type JobDef = { name: string; cron: string; run: () => Promise<void> };
 
 export const JOBS: JobDef[] = [
   { name: "email-poll", cron: "*/30 * * * *", run: runEmailPoll },
+  { name: "linkedin-poll", cron: "15,45 * * * *", run: runLinkedinPoll },
+  { name: "meetings-sync", cron: "5 */2 * * *", run: runMeetingsSync },
+  { name: "kpi-analyze", cron: "30 5 * * *", run: runKpiAnalyze },
   { name: "split-contacts", cron: "30 1 * * *", run: runSplitContacts },
   { name: "pitchbook-sync", cron: "45 1 * * *", run: runPitchbookSync },
   { name: "enrichment", cron: "0 2 * * *", run: runEnrichment },

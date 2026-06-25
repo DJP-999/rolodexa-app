@@ -12,12 +12,18 @@ import {
   Smartphone,
   MessageSquarePlus,
   Database,
+  BarChart3,
+  Snowflake,
+  Calendar,
 } from "lucide-react";
 
 const NAV = [
   { label: "Home", href: "/dashboard", Icon: Home },
   { label: "Contacts", href: "/dashboard/contacts", Icon: Users },
   { label: "PitchBook", href: "/dashboard/pitchbook", Icon: Database },
+  { label: "Calendar", href: "/dashboard/calendar", Icon: Calendar },
+  { label: "KPI Tracking", href: "/dashboard/kpi", Icon: BarChart3 },
+  { label: "Cold Outreach", href: "/dashboard/cold-outreach", Icon: Snowflake },
   { label: "Projects", href: "/dashboard/projects", Icon: Briefcase },
   { label: "Suggestions", href: "/dashboard/suggestions", Icon: Bell },
   { label: "Automations", href: "/dashboard/automations", Icon: AlarmClock },

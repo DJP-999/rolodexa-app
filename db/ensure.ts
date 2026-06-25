@@ -60,5 +60,49 @@ export async function ensureSchema(sql: {
   )`);
   await sql.unsafe(`CREATE INDEX IF NOT EXISTS "pb_firms_user_idx" ON "pitchbook_firms" ("user_id")`);
   await sql.unsafe(`CREATE INDEX IF NOT EXISTS "pb_firms_key_idx" ON "pitchbook_firms" ("user_id","name_key")`);
+  // KPI tracking: richer interaction attribution (replies, counterparty identity, cold link).
+  await sql.unsafe(`ALTER TABLE "interactions" ADD COLUMN IF NOT EXISTS "is_reply" boolean DEFAULT false`);
+  await sql.unsafe(`ALTER TABLE "interactions" ADD COLUMN IF NOT EXISTS "counterparty_email" text`);
+  await sql.unsafe(`ALTER TABLE "interactions" ADD COLUMN IF NOT EXISTS "counterparty_name" text`);
+  await sql.unsafe(`ALTER TABLE "interactions" ADD COLUMN IF NOT EXISTS "cold_prospect_id" uuid`);
+  await sql.unsafe(`CREATE INDEX IF NOT EXISTS "interactions_user_time_idx" ON "interactions" ("user_id","occurred_at")`);
+  // Cold-outreach prospect store (separate from contacts; promoted on meeting set).
+  await sql.unsafe(`DO $$ BEGIN
+    CREATE TYPE "cold_status" AS ENUM ('messaged','replied','meeting_set','ghosted','promoted');
+  EXCEPTION WHEN duplicate_object THEN null; END $$`);
+  await sql.unsafe(`CREATE TABLE IF NOT EXISTS "cold_prospects" (
+    "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    "user_id" uuid NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+    "name" text, "email" text, "linkedin_url" text, "linkedin_member_id" text, "company" text,
+    "identity_key" text NOT NULL,
+    "channel" "channel", "status" "cold_status" NOT NULL DEFAULT 'messaged',
+    "first_outreach_at" timestamptz, "last_outbound_at" timestamptz, "last_inbound_at" timestamptz,
+    "meeting_at" timestamptz,
+    "promoted_contact_id" uuid REFERENCES "contacts"("id") ON DELETE SET NULL,
+    "outbound_count" integer DEFAULT 0, "inbound_count" integer DEFAULT 0,
+    "metadata" jsonb DEFAULT '{}'::jsonb,
+    "created_at" timestamptz NOT NULL DEFAULT now(),
+    "updated_at" timestamptz NOT NULL DEFAULT now()
+  )`);
+  await sql.unsafe(`CREATE INDEX IF NOT EXISTS "cold_user_idx" ON "cold_prospects" ("user_id")`);
+  await sql.unsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "cold_identity_uq" ON "cold_prospects" ("user_id","identity_key")`);
+  // Full calendar mirror + per-meeting held/notes outcome.
+  await sql.unsafe(`CREATE TABLE IF NOT EXISTS "calendar_events" (
+    "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    "user_id" uuid NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+    "source_ref" text NOT NULL,
+    "source" text DEFAULT 'calendar',
+    "title" text, "location" text,
+    "start_at" timestamptz NOT NULL, "end_at" timestamptz,
+    "all_day" boolean DEFAULT false,
+    "attendees" jsonb DEFAULT '[]'::jsonb,
+    "matched_contact_id" uuid REFERENCES "contacts"("id") ON DELETE SET NULL,
+    "cold_prospect_id" uuid,
+    "held" boolean, "held_confirmed_at" timestamptz, "notes" text,
+    "created_at" timestamptz NOT NULL DEFAULT now(),
+    "updated_at" timestamptz NOT NULL DEFAULT now()
+  )`);
+  await sql.unsafe(`CREATE INDEX IF NOT EXISTS "cal_user_start_idx" ON "calendar_events" ("user_id","start_at")`);
+  await sql.unsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "cal_source_uq" ON "calendar_events" ("user_id","source_ref")`);
   console.log("[db] ensureSchema applied.");
 }

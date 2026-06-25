@@ -7,6 +7,7 @@ export const priority = pgEnum("priority", ["high","medium","low"]);
 export const interactionType = pgEnum("interaction_type", ["email_in","email_out","meeting","message_in","message_out"]);
 export const channel = pgEnum("channel", ["nylas_email","nylas_calendar","telegram","imessage","agent_audit","linkedin"]);
 export const notificationOutcome = pgEnum("notification_outcome", ["sent","opened","clicked","approved","snoozed","dismissed","ignored"]);
+export const coldStatus = pgEnum("cold_status", ["messaged","replied","meeting_set","ghosted","promoted"]);
 
 export const users = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -80,8 +81,32 @@ export const interactions = pgTable("interactions", {
   eventType: interactionType("event_type").notNull(), direction: text("direction"), channel: channel("channel").notNull(),
   threadId: text("thread_id"), occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
   sourceRef: text("source_ref"), metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}),
+  // Reply = inbound message on a thread where the user previously sent outbound.
+  isReply: boolean("is_reply").default(false),
+  // Counterparty identity even when no contact is matched (cold outreach / unknown sender).
+  counterpartyEmail: text("counterparty_email"), counterpartyName: text("counterparty_name"),
+  coldProspectId: uuid("cold_prospect_id"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-}, (t) => ({ contactTime: index("interactions_contact_time_idx").on(t.contactId, t.occurredAt), idempotent: uniqueIndex("interactions_source_uq").on(t.userId, t.channel, t.sourceRef) }));
+}, (t) => ({ contactTime: index("interactions_contact_time_idx").on(t.contactId, t.occurredAt), userTime: index("interactions_user_time_idx").on(t.userId, t.occurredAt), idempotent: uniqueIndex("interactions_source_uq").on(t.userId, t.channel, t.sourceRef) }));
+// Cold-outreach prospects: people you've reached out to who are NOT (yet) in your rolodex.
+// Kept in their own table; auto-promoted into contacts when a meeting is set.
+export const coldProspects = pgTable("cold_prospects", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  name: text("name"), email: text("email"), linkedinUrl: text("linkedin_url"),
+  linkedinMemberId: text("linkedin_member_id"), company: text("company"),
+  identityKey: text("identity_key").notNull(), // normalized email or li member id, for dedup
+  channel: channel("channel"), status: coldStatus("status").default("messaged").notNull(),
+  firstOutreachAt: timestamp("first_outreach_at", { withTimezone: true }),
+  lastOutboundAt: timestamp("last_outbound_at", { withTimezone: true }),
+  lastInboundAt: timestamp("last_inbound_at", { withTimezone: true }),
+  meetingAt: timestamp("meeting_at", { withTimezone: true }),
+  promotedContactId: uuid("promoted_contact_id").references(() => contacts.id, { onDelete: "set null" }),
+  outboundCount: integer("outbound_count").default(0), inboundCount: integer("inbound_count").default(0),
+  metadata: jsonb("metadata").$type<Record<string, unknown>>().default({}),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({ cpUserIdx: index("cold_user_idx").on(t.userId), cpKeyUq: uniqueIndex("cold_identity_uq").on(t.userId, t.identityKey) }));
 export const suggestions = pgTable("suggestions", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
@@ -137,6 +162,29 @@ export const jobRuns = pgTable("job_runs", {
   detail: jsonb("detail").$type<Record<string, unknown>>().default({}),
 });
 
+// Every event on the user's connected calendar (full Google-Calendar mirror). Meetings
+// with people in the network/cold list are matched + carry a held/notes outcome.
+export const calendarEvents = pgTable("calendar_events", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  sourceRef: text("source_ref").notNull(), // provider event id (or llm-... for inferred)
+  source: text("source").default("calendar"), // calendar | llm
+  title: text("title"), location: text("location"),
+  startAt: timestamp("start_at", { withTimezone: true }).notNull(),
+  endAt: timestamp("end_at", { withTimezone: true }),
+  allDay: boolean("all_day").default(false),
+  attendees: jsonb("attendees").$type<{ email: string; name: string | null }[]>().default([]),
+  matchedContactId: uuid("matched_contact_id").references(() => contacts.id, { onDelete: "set null" }),
+  coldProspectId: uuid("cold_prospect_id"),
+  held: boolean("held"), // null = pending confirmation, true = held, false = no-show
+  heldConfirmedAt: timestamp("held_confirmed_at", { withTimezone: true }),
+  notes: text("notes"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({ ceUserStart: index("cal_user_start_idx").on(t.userId, t.startAt), ceSourceUq: uniqueIndex("cal_source_uq").on(t.userId, t.sourceRef) }));
+
 export type Contact = typeof contacts.$inferSelect;
 export type Claim = typeof claims.$inferSelect;
 export type Interaction = typeof interactions.$inferSelect;
+export type ColdProspect = typeof coldProspects.$inferSelect;
+export type CalendarEvent = typeof calendarEvents.$inferSelect;
