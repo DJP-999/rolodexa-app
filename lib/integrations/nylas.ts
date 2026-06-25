@@ -12,10 +12,18 @@ export type NylasMessage = {
   unread?: boolean;
 };
 
+// Nylas v3 event shapes are snake_case. `when.object` is "timespan" (start_time/end_time),
+// "date"/"datespan" (all-day), so we read all variants defensively.
 export type NylasEvent = {
   id: string;
   title?: string;
-  when: { startTime?: number; endTime?: number };
+  when: {
+    object?: string;
+    start_time?: number;
+    end_time?: number;
+    date?: string;
+    start_date?: string;
+  };
   participants: { email: string; name?: string }[];
 };
 

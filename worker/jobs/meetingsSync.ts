@@ -31,10 +31,18 @@ export async function runMeetingsSync(): Promise<void> {
         Math.floor((now + FUTURE_MS) / 1000),
       );
       for (const e of events) {
-        const startUnix = e.when?.startTime;
-        if (!e.id || !startUnix) continue;
-        const start = new Date(startUnix * 1000);
-        if (isNaN(start.getTime())) continue;
+        const w = e.when ?? {};
+        let start: Date | null = null;
+        let end: Date | null = null;
+        let allDay = false;
+        if (w.start_time) {
+          start = new Date(w.start_time * 1000);
+          if (w.end_time) end = new Date(w.end_time * 1000);
+        } else if (w.date || w.start_date) {
+          start = new Date(`${w.date ?? w.start_date}T00:00:00Z`);
+          allDay = true;
+        }
+        if (!e.id || !start || isNaN(start.getTime())) continue;
         const attendees: Attendee[] = (e.participants ?? []).map((p) => ({
           email: normEmail(p.email),
           name: p.name ?? null,
@@ -44,7 +52,8 @@ export async function runMeetingsSync(): Promise<void> {
           sourceRef: String(e.id),
           title: e.title ?? null,
           startAt: start,
-          endAt: e.when?.endTime ? new Date(e.when.endTime * 1000) : null,
+          endAt: end,
+          allDay,
           attendees,
           self,
         });
