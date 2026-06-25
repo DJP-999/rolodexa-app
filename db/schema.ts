@@ -50,8 +50,22 @@ export const contacts = pgTable("contacts", {
   importPriority: real("import_priority"), lastContactedAt: timestamp("last_contacted_at", { withTimezone: true }),
   enrichedAt: timestamp("enriched_at", { withTimezone: true }), gradedAt: timestamp("graded_at", { withTimezone: true }),
   gradeRationale: text("grade_rationale"), summary: text("summary"), professionalFit: real("professional_fit"), profileData: jsonb("profile_data").$type<Record<string, unknown>>(), embedding: vector("embedding", { dimensions: 1536 }),
+  // Firm intel matched from the user's imported PitchBook reference data (kept separate
+  // from the user's own customFields/normalizedFields — never overwrites their data).
+  pitchbookData: jsonb("pitchbook_data").$type<Record<string, string>>(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (t) => ({ userIdx: index("contacts_user_idx").on(t.userId), emailIdx: index("contacts_email_idx").on(t.userId, t.email), relevanceIdx: index("contacts_relevance_idx").on(t.userId, t.relevance) }));
+// PitchBook export reference data — FIRMS/investors. Deliberately a SEPARATE table from
+// contacts so the user's real, met-with rolodex never mixes with PitchBook records.
+export const pitchbookFirms = pgTable("pitchbook_firms", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  name: text("name").notNull(),
+  nameKey: text("name_key").notNull(), // normalized firm name for matching to contacts
+  customFields: jsonb("custom_fields").$type<Record<string, string>>().default({}),
+  normalizedFields: jsonb("normalized_fields").$type<Record<string, string>>().default({}),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({ pbUserIdx: index("pb_firms_user_idx").on(t.userId), pbKeyIdx: index("pb_firms_key_idx").on(t.userId, t.nameKey) }));
 export const claims = pgTable("claims", {
   id: uuid("id").primaryKey().defaultRandom(),
   contactId: uuid("contact_id").references(() => contacts.id, { onDelete: "cascade" }).notNull(),

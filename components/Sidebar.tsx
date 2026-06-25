@@ -11,11 +11,13 @@ import {
   Settings,
   Smartphone,
   MessageSquarePlus,
+  Database,
 } from "lucide-react";
 
 const NAV = [
   { label: "Home", href: "/dashboard", Icon: Home },
   { label: "Contacts", href: "/dashboard/contacts", Icon: Users },
+  { label: "PitchBook", href: "/dashboard/pitchbook", Icon: Database },
   { label: "Projects", href: "/dashboard/projects", Icon: Briefcase },
   { label: "Suggestions", href: "/dashboard/suggestions", Icon: Bell },
   { label: "Automations", href: "/dashboard/automations", Icon: AlarmClock },

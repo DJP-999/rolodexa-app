@@ -20,6 +20,7 @@ export type Row = {
   lastContactedAt: string | null;
   customFields: Record<string, string>;
   normalizedFields: Record<string, string>;
+  pitchbookData: Record<string, string> | null;
 };
 export type Facet = { key: string; label: string; categories: string[]; multi?: boolean };
 type ColDef = { key: string; label: string; custom?: boolean };
@@ -280,7 +281,25 @@ export function ContactsTable({
   };
 
   const cellValue = (r: Row, col: ColDef): ReactNode => {
-    if (col.custom) return r.normalizedFields?.[col.key] || r.customFields?.[col.key] || "—";
+    if (col.custom) {
+      const own = r.normalizedFields?.[col.key] || r.customFields?.[col.key];
+      if (own) return own;
+      // Fall back to PitchBook firm intel (clearly tagged; never your own data).
+      const pb = r.pitchbookData?.[col.key];
+      if (pb)
+        return (
+          <span className="inline-flex items-center gap-1">
+            <span className="text-ink/70">{pb}</span>
+            <span
+              className="rounded bg-indigo-50 px-1 text-[9px] font-semibold uppercase tracking-wide text-indigo-500"
+              title="From your PitchBook reference data, not your own"
+            >
+              PB
+            </span>
+          </span>
+        );
+      return "—";
+    }
     switch (col.key) {
       case "company":
         return r.company ?? "—";

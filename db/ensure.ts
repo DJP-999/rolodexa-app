@@ -46,5 +46,19 @@ export async function ensureSchema(sql: {
   await sql.unsafe(`ALTER TABLE "user_context" ADD COLUMN IF NOT EXISTS "field_groupings" jsonb DEFAULT '{}'::jsonb`);
   // LLM-graded domain/thesis fit (0..1) of a contact to the user's focus — drives relevance.
   await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "professional_fit" real`);
+  // PitchBook firm intel matched onto a contact (separate from the user's own fields).
+  await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "pitchbook_data" jsonb`);
+  // Separate reference table for imported PitchBook firms/investors (never mixed with contacts).
+  await sql.unsafe(`CREATE TABLE IF NOT EXISTS "pitchbook_firms" (
+    "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    "user_id" uuid NOT NULL REFERENCES "users"("id") ON DELETE CASCADE,
+    "name" text NOT NULL,
+    "name_key" text NOT NULL,
+    "custom_fields" jsonb DEFAULT '{}'::jsonb,
+    "normalized_fields" jsonb DEFAULT '{}'::jsonb,
+    "created_at" timestamptz NOT NULL DEFAULT now()
+  )`);
+  await sql.unsafe(`CREATE INDEX IF NOT EXISTS "pb_firms_user_idx" ON "pitchbook_firms" ("user_id")`);
+  await sql.unsafe(`CREATE INDEX IF NOT EXISTS "pb_firms_key_idx" ON "pitchbook_firms" ("user_id","name_key")`);
   console.log("[db] ensureSchema applied.");
 }

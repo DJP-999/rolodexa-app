@@ -64,6 +64,7 @@ export async function runFitGrade(): Promise<void> {
           Interests: nf["Interests"],
           Stage: nf["Stage"],
         },
+        pitchbook: (c.pitchbookData ?? null) as Record<string, string> | null,
         profile: pd
           ? { headline: pd.headline, about: pd.about, experience: pd.experience, skills: pd.skills }
           : null,

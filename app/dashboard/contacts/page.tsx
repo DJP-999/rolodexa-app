@@ -134,6 +134,7 @@ export default async function ContactsPage({
     lastContactedAt: c.lastContactedAt ? new Date(c.lastContactedAt).toISOString() : null,
     customFields: (c.customFields ?? {}) as Record<string, string>,
     normalizedFields: (c.normalizedFields ?? {}) as Record<string, string>,
+    pitchbookData: (c.pitchbookData ?? null) as Record<string, string> | null,
   }));
 
   return (

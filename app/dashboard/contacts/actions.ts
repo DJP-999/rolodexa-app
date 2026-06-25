@@ -191,6 +191,7 @@ export async function importCsvAction(formData: FormData) {
     await enqueue("split-contacts"); // break "two people in one cell" rows into distinct contacts first
     await enqueue("enrichment");
     await enqueue("normalize"); // group messy custom-column values into clean categories
+    await enqueue("pitchbook-sync"); // fill firm intel from any imported PitchBook reference data
   }
 
   redirect(`/dashboard/contacts?imported=${toInsert.length}&updated=${toUpdate.length}`);

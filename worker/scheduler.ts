@@ -9,6 +9,7 @@ import { runEnrichment } from "./jobs/enrichment";
 import { runRecompute } from "./jobs/recompute";
 import { runFitGrade } from "./jobs/fitGrade";
 import { runSplitContacts } from "./jobs/splitContacts";
+import { runPitchbookSync } from "./jobs/pitchbookSync";
 import { runSuggestions } from "./jobs/suggestions";
 import { runBrief } from "./jobs/brief";
 import { runNewsScan } from "./jobs/newsScan";
@@ -29,6 +30,7 @@ type JobDef = { name: string; cron: string; run: () => Promise<void> };
 export const JOBS: JobDef[] = [
   { name: "email-poll", cron: "*/30 * * * *", run: runEmailPoll },
   { name: "split-contacts", cron: "30 1 * * *", run: runSplitContacts },
+  { name: "pitchbook-sync", cron: "45 1 * * *", run: runPitchbookSync },
   { name: "enrichment", cron: "0 2 * * *", run: runEnrichment },
   { name: "fit-grade", cron: "30 3 * * *", run: runFitGrade },
   { name: "recompute", cron: "0 4 * * *", run: runRecompute },

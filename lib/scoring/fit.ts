@@ -21,6 +21,7 @@ export type FitInput = {
   relationship?: string | null;
   notes?: string | null;
   derived?: Record<string, string | undefined>;
+  pitchbook?: Record<string, string> | null;
   profile?: {
     headline?: string | null;
     about?: string | null;
@@ -61,6 +62,13 @@ function dossier(c: FitInput): string {
   }
   if (c.profile?.skills?.length) lines.push(`Skills: ${c.profile.skills.slice(0, 10).join(", ")}`);
   if (c.notes) lines.push(`Notes: ${c.notes.slice(0, 400)}`);
+  if (c.pitchbook && Object.keys(c.pitchbook).length) {
+    const pb = Object.entries(c.pitchbook)
+      .filter(([, v]) => v)
+      .map(([k, v]) => `${k}: ${v}`)
+      .join("; ");
+    if (pb) lines.push(`PitchBook firm intel: ${pb}`);
+  }
   return lines.join("\n");
 }
 
