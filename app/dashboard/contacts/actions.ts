@@ -60,7 +60,11 @@ async function mapColumnsLLM(headers: string[], samples: string[][]): Promise<Pa
 
 function guessRelationship(company: string, role: string): Rel {
   const s = `${company} ${role}`.toLowerCase();
-  if (/capital|ventures?|partners|fund|equity|family office|investor|asset manage|wealth/.test(s))
+  if (
+    /capital|ventures?|partners|fund|equity|family office|investor|asset|wealth|holdings?|investment|advis|secondar|hedge|private equity|growth/.test(
+      s,
+    )
+  )
     return "investor";
   return "other";
 }

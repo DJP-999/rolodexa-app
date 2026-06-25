@@ -505,12 +505,19 @@ async function syncCalendar(userId: string, accountId: string): Promise<void> {
 }
 
 async function categorizeUser(userId: string): Promise<void> {
+  const ctx = (await db.select().from(userContext).where(eq(userContext.userId, userId)).limit(1))[0];
+  const who = ctx?.role
+    ? `a ${ctx.role}${ctx.currentFocus ? ` focused on ${ctx.currentFocus}` : ""}`
+    : "a relationship-first dealmaker in private markets";
   const refreshed = await db.select().from(contacts).where(eq(contacts.userId, userId));
+  // Re-evaluate unset/'other' AND existing 'vendor' labels (the latter are frequently
+  // mis-tagged investment firms), but never touch the user's personal classifications.
   const need = refreshed.filter(
-    (c) => (!c.relationship || c.relationship === "other") && (c.company || c.role),
+    (c) =>
+      (!c.relationship || c.relationship === "other" || c.relationship === "vendor") && (c.company || c.role),
   );
   const valid = new Set(["family", "friend", "coworker", "investor", "vendor", "other"]);
-  for (let i = 0; i < need.length && i < 300; i += 50) {
+  for (let i = 0; i < need.length && i < 3000; i += 50) {
     const slice = need.slice(i, i + 50).map((c) => ({
       id: c.id,
       name: c.name,
@@ -520,10 +527,18 @@ async function categorizeUser(userId: string): Promise<void> {
     const raw = await complete({
       tier: "cheap",
       system:
-        "You categorize professional contacts for a relationship-first dealmaker (pre-IPO secondaries, lower-middle-market buyouts). " +
-        "Categories: family, friend, coworker, investor, vendor, other. " +
-        "investor = capital allocators: LPs, family offices, VCs, PE, wealth/asset managers, angels. " +
-        "vendor = service providers selling to the user. Use 'other' when unsure. Return JSON only.",
+        `You categorize professional contacts for ${who}. ` +
+        "Categories: family, friend, coworker, investor, vendor, other.\n" +
+        "investor = ANY firm or person whose business is INVESTING or ALLOCATING capital: VC, growth equity, PE, " +
+        "buyout, secondaries, hedge funds, family offices, LPs, fund-of-funds, asset/wealth managers, RIAs, angels, " +
+        "sovereign/endowment/pension funds, search funds, SPVs, and holding or investment companies. Firm-name cues " +
+        "like 'Capital', 'Ventures', 'Partners', 'Holdings', 'Management', 'Advisors', 'Investments', 'Equity', " +
+        "'Asset', 'Fund', 'Group' almost always mean investor.\n" +
+        "vendor = ONLY service providers the user would PAY or buy from: law firms, accountants, fund administrators, " +
+        "recruiters, consultants, software/data vendors, PR/marketing agencies, brokerage/coverage desks.\n" +
+        "coworker = at the user's own firm. friend/family = personal ties. other = genuinely none of the above.\n" +
+        "Be decisive: if a firm clearly invests, choose investor. NEVER default to vendor when unsure — use 'other'. " +
+        "Return JSON only.",
       messages: [
         {
           role: "user",
