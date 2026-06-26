@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ChevronDown, ArrowRight, Loader2, SlidersHorizontal, Pencil } from "lucide-react";
 import DeleteContactButton from "./DeleteContactButton";
 import VipToggle from "./VipToggle";
+import ReconnectButton from "./ReconnectButton";
 
 export type Row = {
   id: string;
@@ -116,6 +117,7 @@ function Summary({ d, id, highValue }: { d: any; id: string; highValue: boolean 
         </div>
       </div>
       {d.pitchbook && Object.keys(d.pitchbook).length > 0 && <PitchbookProfile pb={d.pitchbook} />}
+      <ReconnectButton id={id} name={d.name ?? "this contact"} />
       <div className="flex items-center justify-between gap-3 pt-1">
         <Link
           href={`/dashboard/contacts/${id}`}
