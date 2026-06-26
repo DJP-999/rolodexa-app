@@ -49,7 +49,8 @@ const schema = z.object({
   // Set APIFY_TOKEN to enable; the actor id uses Apify's "username~actor-name" form.
   APIFY_TOKEN: z.string().optional(),
   APIFY_ACTOR_ID: z.string().default("harvestapi~linkedin-profile-scraper"),
-  APIFY_URLS_FIELD: z.string().default("profileUrls"),
+  APIFY_URLS_FIELD: z.string().default("queries"), // the actor's profile-URL array field
+  APIFY_PROFILE_MODE: z.string().default("Profile details no email ($4 per 1k)"),
   APIFY_ACTOR_INPUT: z.string().optional(), // optional JSON of extra static actor input
   APIFY_PROFILE_DAILY_CAP: z.coerce.number().default(500),
 });

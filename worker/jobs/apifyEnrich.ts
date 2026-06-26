@@ -11,7 +11,7 @@ import {
 
 type Contact = typeof contacts.$inferSelect;
 
-const BATCH = 25; // profile URLs per synchronous actor run
+const BATCH = 25; // profile URLs per actor run (the actor accepts a queries[] array)
 const STALE_MS = env.ENRICH_STALE_AFTER_DAYS * 86_400_000;
 
 /** LinkedIn public slug from a profile URL, lowercased. */
@@ -76,7 +76,7 @@ export async function runApifyEnrich(): Promise<void> {
       const normalized = normalizeApifyProfile(item);
       const exp = normalized.experience as Array<{ company: string | null; position: string | null; current: boolean }>;
       const cur = exp.find((e) => e.current) ?? exp[0];
-      const company = cur?.company || c.company;
+      const company = (normalized.currentCompany as string | null) || cur?.company || c.company;
       const role = cur?.position || c.role;
       await db
         .update(contacts)

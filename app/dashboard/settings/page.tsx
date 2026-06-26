@@ -50,6 +50,7 @@ const JOB_META: [string, string, string][] = [
   ["news-scan", "News scan", "10a/3p/6p"],
   ["email-poll", "Email Poll", "Every 30m"],
   ["linkedin-poll", "LinkedIn Poll", "Every 30m"],
+  ["message-backfill", "Message backfill", "5:00 AM"],
   ["meetings-sync", "Meetings sync", "Every 2h"],
   ["kpi-analyze", "Conversation analysis", "5:30 AM"],
   ["morning-brief", "Morning brief", "7:00 AM"],

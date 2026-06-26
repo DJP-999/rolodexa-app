@@ -10,6 +10,7 @@ import { runMeetingsSync } from "./jobs/meetingsSync";
 import { runKpiAnalyze } from "./jobs/kpiAnalyze";
 import { runEnrichment } from "./jobs/enrichment";
 import { runApifyEnrich } from "./jobs/apifyEnrich";
+import { runMessageBackfill } from "./jobs/messageBackfill";
 import { runRecompute } from "./jobs/recompute";
 import { runFitGrade } from "./jobs/fitGrade";
 import { runSplitContacts } from "./jobs/splitContacts";
@@ -35,6 +36,7 @@ export const JOBS: JobDef[] = [
   { name: "email-poll", cron: "*/30 * * * *", run: runEmailPoll },
   { name: "linkedin-poll", cron: "15,45 * * * *", run: runLinkedinPoll },
   { name: "meetings-sync", cron: "5 */2 * * *", run: runMeetingsSync },
+  { name: "message-backfill", cron: "0 5 * * *", run: runMessageBackfill },
   { name: "kpi-analyze", cron: "30 5 * * *", run: runKpiAnalyze },
   { name: "split-contacts", cron: "30 1 * * *", run: runSplitContacts },
   { name: "pitchbook-sync", cron: "45 1 * * *", run: runPitchbookSync },
