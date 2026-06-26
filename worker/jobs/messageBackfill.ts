@@ -47,7 +47,7 @@ export async function runMessageBackfill(): Promise<void> {
       return m ? slugToContact.get(decodeURIComponent(m[1]).toLowerCase()) : undefined;
     };
 
-    const chats = await getChats(g.externalId);
+    const chats = await getChats(g.externalId, undefined, env.MESSAGE_BACKFILL_CHAT_CAP);
     if (!chats.length) continue;
 
     // Phase 1: resolve by the chat's attendee provider-id, then by any profile slug on the chat.
@@ -62,8 +62,11 @@ export async function runMessageBackfill(): Promise<void> {
     }
 
     // Phase 2: look up attendees (parallel) and match by provider-id, profile SLUG, then name.
-    for (let i = 0; i < unresolved.length; i += 10) {
-      const slice = unresolved.slice(i, i + 10);
+    // Phase 1 (id/slug from the chat object) already covers the reliable matches across ALL
+    // chats cheaply; attendee lookups are the slow part, so bound them at a high inbox depth.
+    const toLookUp = unresolved.slice(0, env.MESSAGE_BACKFILL_ATTENDEE_LOOKUPS);
+    for (let i = 0; i < toLookUp.length; i += 10) {
+      const slice = toLookUp.slice(i, i + 10);
       const lists = await Promise.all(slice.map((c) => getChatAttendees(String(c.id))));
       slice.forEach((chat, j) => {
         for (const a of lists[j] ?? []) {

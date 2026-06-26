@@ -116,8 +116,8 @@ export async function getProfile(
   }
 }
 
-/** LinkedIn chats for the account; optionally only those after an ISO date. */
-export async function getChats(accountId: string, after?: string): Promise<any[]> {
+/** LinkedIn chats for the account; optionally only those after an ISO date. Cap bounds pagination. */
+export async function getChats(accountId: string, after?: string, cap = 2000): Promise<any[]> {
   const client = await getClient();
   if (!client) return [];
   const out: any[] = [];
@@ -134,7 +134,7 @@ export async function getChats(accountId: string, after?: string): Promise<any[]
       const items: any[] = res?.items ?? res?.data ?? [];
       out.push(...items);
       cursor = res?.cursor ?? res?.paging?.cursor ?? res?.next_cursor ?? undefined;
-    } while (cursor && out.length < 2000);
+    } while (cursor && out.length < cap);
   } catch (e) {
     console.error("[unipile] getChats", e);
   }
