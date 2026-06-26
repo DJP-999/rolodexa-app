@@ -518,12 +518,24 @@ async function categorizeUser(userId: string): Promise<void> {
   );
   const valid = new Set(["family", "friend", "coworker", "investor", "vendor", "other"]);
   for (let i = 0; i < need.length && i < 3000; i += 50) {
-    const slice = need.slice(i, i + 50).map((c) => ({
-      id: c.id,
-      name: c.name,
-      company: c.company,
-      role: c.role,
-    }));
+    const slice = need.slice(i, i + 50).map((c) => {
+      const nf = (c.normalizedFields ?? {}) as Record<string, string>;
+      const cf = (c.customFields ?? {}) as Record<string, string>;
+      const ftKey = Object.keys(cf).find((k) => /firm.?type|investor.?type|\btype\b|category|strategy/i.test(k));
+      const notesKey = Object.keys(cf).find((k) => /note|background|summary|description|comment|bio|about/i.test(k));
+      const pb = (c.pitchbookData ?? null) as Record<string, string> | null;
+      const firmType = nf["Firm Type"] || pb?.["Firm Type"] || (ftKey ? cf[ftKey] : "") || undefined;
+      const notes = (notesKey ? cf[notesKey] : "") || c.summary || "";
+      return {
+        id: c.id,
+        name: c.name,
+        company: c.company,
+        role: c.role,
+        industry: c.industry ?? undefined,
+        firmType,
+        notes: notes ? notes.slice(0, 400) : undefined,
+      };
+    });
     const raw = await complete({
       tier: "cheap",
       system:
@@ -537,6 +549,10 @@ async function categorizeUser(userId: string): Promise<void> {
         "vendor = ONLY service providers the user would PAY or buy from: law firms, accountants, fund administrators, " +
         "recruiters, consultants, software/data vendors, PR/marketing agencies, brokerage/coverage desks.\n" +
         "coworker = at the user's own firm. friend/family = personal ties. other = genuinely none of the above.\n" +
+        "Each contact may include 'industry', 'firmType' and 'notes' — these are AUTHORITATIVE, especially the notes (the user's " +
+        "own description of who the person is and what they do). If notes, firmType or industry describe an investing strategy or " +
+        "vehicle (VC, growth equity, PE, buyout, secondaries, hedge fund, family office, asset/wealth manager, RIA, fund-of-funds, " +
+        "holding company, SPV, angel, LP, etc.), classify as investor even if the firm's NAME gives no cue. " +
         "Be decisive: if a firm clearly invests, choose investor. NEVER default to vendor when unsure — use 'other'. " +
         "Return JSON only.",
       messages: [
