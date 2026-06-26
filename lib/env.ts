@@ -50,6 +50,9 @@ const schema = z.object({
   // goals" and gets swept (not just a top-N). Rotated stalest-first, NEWS_SCAN_BATCH per run.
   NEWS_FIT_FLOOR: z.coerce.number().default(0.45),
   NEWS_SCAN_BATCH: z.coerce.number().default(60),
+  // Set to a contact's name to print targeted diagnostics in the message-backfill job
+  // (does their chat exist in the synced set, and why did/didn't it attribute). Leave unset normally.
+  DEBUG_BACKFILL_NAME: z.string().optional(),
   ENRICH_DAILY_LINKEDIN_CAP: z.coerce.number().default(120),
   ENRICH_MONTHLY_BUDGET_USD: z.coerce.number().default(40),
 

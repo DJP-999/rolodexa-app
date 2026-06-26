@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { connectedAccounts, contacts, interactions } from "@/db/schema";
 import { getChatAttendees, getChatMessages, getChats, unipileConfigured } from "@/lib/integrations/unipile";
 import { nameKey } from "@/lib/match/entity";
+import { env } from "@/lib/env";
 
 const PER_CHAT = 80; // deep history per conversation (the poll handles recency)
 
@@ -122,5 +123,41 @@ export async function runMessageBackfill(): Promise<void> {
     console.log(
       `[message-backfill] ${g.userId}: ${chats.length} chats, ${resolved.size} resolved, ${n} messages`,
     );
+
+    // --- Targeted diagnostic (only when DEBUG_BACKFILL_NAME is set) ---
+    if (env.DEBUG_BACKFILL_NAME) {
+      const want = nameKey(env.DEBUG_BACKFILL_NAME);
+      const lastTok = want.split(" ").pop() ?? want;
+      const resolvedIds = new Set(resolved.values());
+      const targets = list.filter((c) => {
+        const k = nameKey(c.name);
+        return k === want || k.includes(want) || (lastTok.length >= 3 && k.includes(lastTok));
+      });
+      console.log(`[backfill-debug] target "${env.DEBUG_BACKFILL_NAME}" → ${targets.length} matching contact(s)`);
+      for (const t of targets) {
+        const slug = (t.linkedinUrl ?? "").match(/\/in\/([^/?#]+)/i)?.[1] ?? null;
+        console.log(
+          `[backfill-debug] contact "${t.name}" id=${t.id} memberId=${t.linkedinMemberId ?? "NONE"} url=${
+            t.linkedinUrl ?? "NONE"
+          } slug=${slug ?? "NONE"} resolvedToAChat=${resolvedIds.has(t.id)}`,
+        );
+      }
+      // Does ANY synced chat reference the target (by last-name token or slug)?
+      const re = new RegExp(lastTok.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+      const hits = chats.filter((ch) => re.test(JSON.stringify(ch ?? "")));
+      console.log(`[backfill-debug] ${hits.length}/${chats.length} synced chats mention "${lastTok}"`);
+      for (const ch of hits.slice(0, 5)) {
+        console.log(
+          `[backfill-debug] chat id=${ch.id} attendee_provider_id=${ch.attendee_provider_id ?? "?"} chatJson=${JSON.stringify(ch).slice(0, 500)}`,
+        );
+        const atts = await getChatAttendees(String(ch.id));
+        console.log(`[backfill-debug]   attendees=${JSON.stringify(atts).slice(0, 900)}`);
+      }
+      if (!hits.length) {
+        console.log(
+          `[backfill-debug] CONCLUSION: no synced chat references "${lastTok}" — the conversation is NOT in the connected LinkedIn account's chat list (likely InMail, a filtered/Other inbox, or a different account). App-side matching cannot recover what Unipile doesn't return.`,
+        );
+      }
+    }
   }
 }
