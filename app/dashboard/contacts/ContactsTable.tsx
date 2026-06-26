@@ -4,6 +4,7 @@ import { Fragment, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { ChevronDown, ArrowRight, Loader2, SlidersHorizontal, Pencil } from "lucide-react";
 import DeleteContactButton from "./DeleteContactButton";
+import VipToggle from "./VipToggle";
 
 export type Row = {
   id: string;
@@ -77,7 +78,7 @@ function parseMaybeDate(s: string): number | null {
   return isNaN(t) ? null : t;
 }
 
-function Summary({ d, id }: { d: any; id: string }) {
+function Summary({ d, id, highValue }: { d: any; id: string; highValue: boolean }) {
   const s = d.stats ?? {};
   const li = s.lastInteraction;
   return (
@@ -122,7 +123,10 @@ function Summary({ d, id }: { d: any; id: string }) {
         >
           View full profile <ArrowRight className="h-3.5 w-3.5" />
         </Link>
-        <DeleteContactButton id={id} name={d.name ?? "this contact"} />
+        <div className="flex items-center gap-2">
+          <VipToggle id={id} initial={highValue} />
+          <DeleteContactButton id={id} name={d.name ?? "this contact"} />
+        </div>
       </div>
     </div>
   );
@@ -656,7 +660,7 @@ export function ContactsTable({
                             <Loader2 className="h-4 w-4 animate-spin" /> Loading…
                           </span>
                         ) : d?.ok ? (
-                          <Summary d={d} id={r.id} />
+                          <Summary d={d} id={r.id} highValue={!!r.highValue} />
                         ) : (
                           <span className="text-sm text-muted">No details available.</span>
                         )}
