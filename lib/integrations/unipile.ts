@@ -198,7 +198,7 @@ export async function sendLinkedInMessage(
 /** Send an email from a connected mailbox. Returns true only on success. */
 export async function sendEmail(
   accountId: string,
-  opts: { to: string; subject: string; body: string },
+  opts: { to: string; subject: string; body: string; from?: { name?: string | null; email: string } },
 ): Promise<boolean> {
   const client = await getClient();
   if (!client || !opts.to || !opts.body.trim()) return false;
@@ -208,6 +208,10 @@ export async function sendEmail(
       to: [{ identifier: opts.to }],
       subject: opts.subject,
       body: opts.body,
+      // Show the user's real name (e.g. "Dominick Pandolfo") instead of the bare address.
+      ...(opts.from?.name && opts.from.email
+        ? { from: { display_name: opts.from.name, identifier: opts.from.email } }
+        : {}),
     });
     return true;
   } catch (e) {

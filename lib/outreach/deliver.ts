@@ -1,6 +1,6 @@
 import { and, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { connectedAccounts, contacts, interactions } from "@/db/schema";
+import { connectedAccounts, contacts, interactions, users } from "@/db/schema";
 import { sendEmail, sendLinkedInMessage } from "@/lib/integrations/unipile";
 import { stripEmDashes } from "@/lib/agent/tone";
 
@@ -88,7 +88,15 @@ export async function deliverOutreach(
     const emId = await unipileAccount(userId, "email");
     if (emId && contact.email) {
       const first = contact.name.split(/\s+/)[0] || "there";
-      const ok = await sendEmail(emId, { to: contact.email, subject: `Hi ${first}`, body: text });
+      const sender = (
+        await db.select({ name: users.name, email: users.email }).from(users).where(eq(users.id, userId)).limit(1)
+      )[0];
+      const ok = await sendEmail(emId, {
+        to: contact.email,
+        subject: `Hi ${first}`,
+        body: text,
+        ...(sender?.email ? { from: { name: sender.name, email: sender.email } } : {}),
+      });
       if (ok) {
         await logOutbound(userId, contact.id, "nylas_email");
         return { ok: true, channel: "email", detail: "email" };

@@ -1,4 +1,4 @@
-import { and, between, eq } from "drizzle-orm";
+import { and, between, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { calendarEvents, contacts } from "@/db/schema";
 import { getPrimaryUser } from "@/lib/user";
@@ -27,7 +27,14 @@ async function getEvents(userId: string): Promise<EventVM[]> {
       })
       .from(calendarEvents)
       .leftJoin(contacts, eq(contacts.id, calendarEvents.matchedContactId))
-      .where(and(eq(calendarEvents.userId, userId), between(calendarEvents.startAt, from, to)))
+      // Only real calendar events — never the "Meeting detected from conversation" (source=llm) inferences.
+      .where(
+        and(
+          eq(calendarEvents.userId, userId),
+          sql`${calendarEvents.source} is distinct from 'llm'`,
+          between(calendarEvents.startAt, from, to),
+        ),
+      )
       .orderBy(calendarEvents.startAt)
       .limit(2000);
     return rows.map((r) => ({
