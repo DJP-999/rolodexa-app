@@ -119,5 +119,8 @@ export async function ensureSchema(sql: {
   // so an on-thesis investor ranks high on who they are, not just interaction history.
   await sql.unsafe(`UPDATE "user_context" SET "weights" = '{"professional":60,"recency":15,"relationship":10,"geographic":5,"trigger":0,"replyPropensity":10}'::jsonb
     WHERE "weights" IS NULL OR ("weights"->>'professional') IS NULL OR ("weights"->>'professional')::numeric < 60`);
+  // Purge inferred "Meeting detected from conversation" events (source='llm') that polluted the
+  // calendar. Detection is now disabled; this cleanup is idempotent (nothing new is created).
+  await sql.unsafe(`DELETE FROM "calendar_events" WHERE "source" = 'llm'`);
   console.log("[db] ensureSchema applied.");
 }
