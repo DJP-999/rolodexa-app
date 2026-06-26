@@ -46,6 +46,10 @@ const schema = z.object({
   ENRICH_STALE_AFTER_DAYS: z.coerce.number().default(30),
   NEWS_FRESHNESS_DAYS: z.coerce.number().default(31),
   ENRICH_NEWS_DAYS_ONGOING: z.coerce.number().default(7),
+  // News sweep coverage: anyone whose thesis-fit clears this floor is "valuable to the user's
+  // goals" and gets swept (not just a top-N). Rotated stalest-first, NEWS_SCAN_BATCH per run.
+  NEWS_FIT_FLOOR: z.coerce.number().default(0.45),
+  NEWS_SCAN_BATCH: z.coerce.number().default(60),
   ENRICH_DAILY_LINKEDIN_CAP: z.coerce.number().default(120),
   ENRICH_MONTHLY_BUDGET_USD: z.coerce.number().default(40),
 

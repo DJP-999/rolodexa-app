@@ -53,6 +53,7 @@ export const contacts = pgTable("contacts", {
   status: contactStatus("status").default("active"), highValue: boolean("high_value").default(false),
   importPriority: real("import_priority"), lastContactedAt: timestamp("last_contacted_at", { withTimezone: true }),
   enrichedAt: timestamp("enriched_at", { withTimezone: true }), gradedAt: timestamp("graded_at", { withTimezone: true }),
+  lastNewsCheckAt: timestamp("last_news_check_at", { withTimezone: true }),
   gradeRationale: text("grade_rationale"), summary: text("summary"), professionalFit: real("professional_fit"), profileData: jsonb("profile_data").$type<Record<string, unknown>>(), embedding: vector("embedding", { dimensions: 1536 }),
   // Firm intel matched from the user's imported PitchBook reference data (kept separate
   // from the user's own customFields/normalizedFields — never overwrites their data).

@@ -13,13 +13,13 @@ import {
   deriveSuppressedCategories,
   type GateContext,
 } from "@/lib/notifications/gate";
+import { env } from "@/lib/env";
 import { sendMessage } from "@/lib/integrations/telegram";
 import { resolveChannel } from "@/lib/outreach/deliver";
 import { webNewsPass, xNewsPass } from "./enrichment";
 import { runSuggestions } from "./suggestions";
 
 const NEWS_SCAN_WINDOW_DAYS = 7; // look back a week so genuine news isn't missed between scans
-const NEWS_SCAN_TOP_N = 10; // keep cost bounded: only your most important relationships
 const BREAKING_DAILY_CAP = 2; // a breaking ping must be rare to stay worth opening
 const BREAKING_MIN_SCORE = 0.62;
 const FRESH_HOURS = 12; // only ping on genuinely new items
@@ -57,13 +57,29 @@ export async function runNewsScan(): Promise<void> {
   // (stable ids) and validated at creation, so we re-derive without wiping — that keeps
   // every suggestion's cited source intact instead of orphaning it on each scan.
   for (const [, list] of byUser) {
-    const top = list
-      .filter((c) => !c.isOrganization && ((c.relevance ?? 0) >= 60 || c.highValue))
-      .sort((a, b) => (b.relevance ?? 0) - (a.relevance ?? 0))
-      .slice(0, NEWS_SCAN_TOP_N);
-    if (!top.length) continue;
-    await webNewsPass(top, NEWS_SCAN_WINDOW_DAYS, top.length);
-    await xNewsPass(top, NEWS_SCAN_WINDOW_DAYS, top.length);
+    // Everyone valuable to the user's goals — anyone clearing the thesis-fit floor, plus VIPs
+    // and broadly-relevant contacts — not just a top-N. Then ROTATE: scan the stalest first
+    // (never-checked before oldest-checked) up to a per-run batch, so over the day's runs the
+    // whole valuable pool gets covered without re-searching the same names every few hours.
+    const eligible = list.filter(
+      (c) =>
+        !c.isOrganization &&
+        (c.highValue || (c.professionalFit ?? 0) >= env.NEWS_FIT_FLOOR || (c.relevance ?? 0) >= 50),
+    );
+    eligible.sort((a, b) => {
+      const at = a.lastNewsCheckAt ? new Date(a.lastNewsCheckAt).getTime() : 0;
+      const bt = b.lastNewsCheckAt ? new Date(b.lastNewsCheckAt).getTime() : 0;
+      if (at !== bt) return at - bt; // never-checked / stalest first
+      return Math.max(b.professionalFit ?? 0, (b.relevance ?? 0) / 100) - Math.max(a.professionalFit ?? 0, (a.relevance ?? 0) / 100);
+    });
+    const batch = eligible.slice(0, env.NEWS_SCAN_BATCH);
+    if (!batch.length) continue;
+    await webNewsPass(batch, NEWS_SCAN_WINDOW_DAYS, batch.length);
+    await xNewsPass(batch, NEWS_SCAN_WINDOW_DAYS, batch.length);
+    await db
+      .update(contacts)
+      .set({ lastNewsCheckAt: new Date() })
+      .where(inArray(contacts.id, batch.map((c) => c.id)));
   }
 
   // 2) Convert any new claims into ranked suggestions (deduped inside).

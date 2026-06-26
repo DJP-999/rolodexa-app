@@ -608,9 +608,9 @@ async function extractNews(
       "You validate web search results about a specific professional contact (and their firm) for a relationship CRM. " +
       "For each result decide TWO things: (1) is it genuinely about THIS exact person OR their EXACT firm — NOT a different person or a company that merely shares a word or partial name " +
       "(e.g. an article about 'Ion Video' is NOT about a contact at 'Ion Pacific'; 'Acme Capital' is NOT 'Acme Health'; a shared first word is NOT a match); and " +
-      "(2) does it report a NOTEWORTHY, RECENT professional event (funding, new role or promotion, company launch, award, acquisition, board seat, major milestone)? " +
+      "(2) does it report a NOTEWORTHY, RECENT professional event? FIRM-LEVEL news counts and is wanted: a fund close/raise, a new investment or portfolio deal, an acquisition, an exit/IPO, an office or strategy expansion — these are directly relevant to a contact who works there, even if the article never names the person. Person-level events also count (new role/promotion, board seat, award, launch). " +
       "The person or firm named in the article must match exactly. Be strict: when unsure it is the same person/firm, mark about_this_person false. " +
-      "The summary MUST explicitly name the matched person or firm. Give the event date if stated. Return JSON only.",
+      "Write the summary as one factual sentence that names the matched person or firm; when the event is about the FIRM, phrase it to connect to the contact's role (e.g. 'Insight Partners — where they are a Managing Director — closed a $12.5B fund'). Give the event date if stated. Return JSON only.",
     messages: [
       {
         role: "user",
@@ -670,10 +670,15 @@ async function discoverXHandle(c: Contact, canSearch: boolean): Promise<string |
  * plus the top-N others by relevance. VIPs are must-watch, so they're never cut by the cap.
  */
 function selectPriority(glist: Contact[], limit: number): Contact[] {
+  // "Valuable to the user's goals" = clears the thesis-fit floor (or is a VIP, or is broadly
+  // relevant) — not an arbitrary top rank. Fit is the purest signal of value to their projects.
   const eligible = glist.filter(
-    (c) => !c.isOrganization && ((c.relevance ?? 0) >= 55 || c.highValue),
+    (c) =>
+      !c.isOrganization &&
+      (c.highValue || (c.professionalFit ?? 0) >= env.NEWS_FIT_FLOOR || (c.relevance ?? 0) >= 45),
   );
-  const sorted = eligible.sort((a, b) => (b.relevance ?? 0) - (a.relevance ?? 0));
+  const score = (c: Contact) => Math.max(c.professionalFit ?? 0, (c.relevance ?? 0) / 100);
+  const sorted = eligible.sort((a, b) => score(b) - score(a));
   const vips = sorted.filter((c) => c.highValue);
   const rest = sorted.filter((c) => !c.highValue).slice(0, limit);
   const seen = new Set<string>();
@@ -688,11 +693,21 @@ export async function webNewsPass(glist: Contact[], windowDays: number, limit = 
   for (const c of priority) {
     // Quote the firm so Exa weights the exact phrase, not a shared first word.
     const firmQ = c.company ? `"${c.company}" ` : "";
-    const results = await search({
-      query: `${firmQ}${c.name} funding OR announcement OR appointed OR award`,
-      startPublishedDate: startDate,
-      numResults: 4,
-    });
+    // Two passes: (1) the PERSON's own milestones, and (2) the FIRM's deal/fundraise news on
+    // its own — private-markets contacts rarely make the press by name, but their firms do
+    // (fund closes, new investments, acquisitions), and that's directly relevant to them.
+    const queries = [`${firmQ}${c.name} funding OR appointed OR promoted OR award OR launches`];
+    if (c.company) {
+      queries.push(
+        `"${c.company}" (raises OR closes OR fund OR fundraise OR investment OR invests OR acquires OR acquisition OR backs OR "leads round" OR "Series" OR portfolio OR IPO OR exit)`,
+      );
+    }
+    const seen = new Set<string>();
+    const results: { title?: string; url: string; publishedDate?: string; text?: string; highlights?: string[] }[] = [];
+    for (const q of queries) {
+      const hits = await search({ query: q, startPublishedDate: startDate, numResults: 5 });
+      for (const r of hits) if (r.url && !seen.has(r.url)) (seen.add(r.url), results.push(r));
+    }
     const validated = await extractNews(c, results, windowDays);
     for (const v of validated) {
       await writeClaim({

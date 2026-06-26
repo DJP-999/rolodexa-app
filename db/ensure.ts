@@ -110,6 +110,8 @@ export async function ensureSchema(sql: {
   await sql.unsafe(`ALTER TABLE "user_context" ADD COLUMN IF NOT EXISTS "writing_style_by_situation" jsonb DEFAULT '{}'::jsonb`);
   // How a contact entered the rolodex (manual | meeting | csv | split | linkedin).
   await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "source" text`);
+  // Rotation cursor for the news sweep so coverage cycles across the whole valuable pool.
+  await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "last_news_check_at" timestamptz`);
   // One-time backfill: tag contacts that came from a met-with meeting or a promoted prospect.
   await sql.unsafe(`UPDATE "contacts" SET "source" = 'meeting' WHERE "source" IS NULL AND (
     "id" IN (SELECT "matched_contact_id" FROM "calendar_events" WHERE "matched_contact_id" IS NOT NULL)
