@@ -195,6 +195,7 @@ export async function importCsvAction(formData: FormData) {
   if (toInsert.length || toUpdate.length) {
     await enqueue("split-contacts"); // break "two people in one cell" rows into distinct contacts first
     await enqueue("apify-enrich"); // full LinkedIn profiles on import (no rate limit) when APIFY_TOKEN is set
+    await enqueue("apify-resolve"); // find URLs for contacts imported without a LinkedIn link, then enrich
     await enqueue("enrichment");
     await enqueue("normalize"); // group messy custom-column values into clean categories
     await enqueue("pitchbook-sync"); // fill firm intel from any imported PitchBook reference data

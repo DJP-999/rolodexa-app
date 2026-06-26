@@ -43,8 +43,11 @@ async function viaAnthropic(tier: Tier, opts: Opts): Promise<string | null> {
   }
 }
 
-async function viaOpenRouter(opts: Opts): Promise<string | null> {
+async function viaOpenRouter(opts: Opts, tier: Tier): Promise<string | null> {
   if (!isConfigured("openrouter")) return null;
+  // Strong tier can use a dedicated model (e.g. GLM-5.2); else fall back to the cheap model.
+  const model =
+    tier === "strong" ? env.OPENROUTER_MODEL_STRONG || env.OPENROUTER_MODEL_CHEAP : env.OPENROUTER_MODEL_CHEAP;
   try {
     const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
@@ -54,7 +57,7 @@ async function viaOpenRouter(opts: Opts): Promise<string | null> {
         "X-Title": "Rolodexa",
       },
       body: JSON.stringify({
-        model: env.OPENROUTER_MODEL_CHEAP,
+        model,
         max_tokens: opts.maxTokens ?? 1024,
         temperature: opts.temperature ?? 0.4,
         messages: [
@@ -79,8 +82,10 @@ async function viaOpenRouter(opts: Opts): Promise<string | null> {
 export async function complete(opts: Opts): Promise<string> {
   const order =
     opts.tier === "cheap"
-      ? [() => viaOpenRouter(opts), () => viaAnthropic("cheap", opts)]
-      : [() => viaAnthropic("strong", opts), () => viaOpenRouter(opts)];
+      ? [() => viaOpenRouter(opts, "cheap"), () => viaAnthropic("cheap", opts)]
+      : env.LLM_STRONG_PROVIDER === "openrouter"
+        ? [() => viaOpenRouter(opts, "strong"), () => viaAnthropic("strong", opts)]
+        : [() => viaAnthropic("strong", opts), () => viaOpenRouter(opts, "strong")];
   for (const attempt of order) {
     const r = await attempt();
     if (r != null && r.length > 0) return r;

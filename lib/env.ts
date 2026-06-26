@@ -31,6 +31,10 @@ const schema = z.object({
 
   OPENROUTER_API_KEY: z.string().optional(),
   OPENROUTER_MODEL_CHEAP: z.string().default("openai/gpt-4o-mini"),
+  // Optional: route the STRONG tier via OpenRouter (e.g. "z-ai/glm-5.2"). Falls back to the
+  // cheap model if unset. Set LLM_STRONG_PROVIDER=openrouter to make it the primary for drafts.
+  OPENROUTER_MODEL_STRONG: z.string().optional(),
+  LLM_STRONG_PROVIDER: z.enum(["anthropic", "openrouter"]).default("anthropic"),
 
   AUTH_SECRET: z.string().optional(),
   AUTH_DEV_USER_EMAIL: z.string().default("dev@rolodexa.local"),
@@ -53,6 +57,11 @@ const schema = z.object({
   APIFY_PROFILE_MODE: z.string().default("Profile details no email ($4 per 1k)"),
   APIFY_ACTOR_INPUT: z.string().optional(), // optional JSON of extra static actor input
   APIFY_PROFILE_DAILY_CAP: z.coerce.number().default(500),
+  // Search actor — resolves URL-less contacts by name + company, then enriches in one shot.
+  APIFY_SEARCH_ACTOR_ID: z.string().default("harvestapi~linkedin-profile-search"),
+  APIFY_SEARCH_MODE: z.string().default("Full ($0.1 per search page + $0.004 per full profile)"),
+  APIFY_SEARCH_INPUT: z.string().optional(),
+  APIFY_RESOLVE_DAILY_CAP: z.coerce.number().default(150),
 });
 
 export const env = schema.parse(process.env);

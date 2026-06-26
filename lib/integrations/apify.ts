@@ -71,6 +71,60 @@ export async function fetchLinkedInProfilesRaw(urls: string[]): Promise<any[]> {
   }
 }
 
+/**
+ * Search LinkedIn by a fuzzy "name + company" query via the search actor, returning matching
+ * full profiles (same flat shape as the scraper). Used to RESOLVE contacts that have no
+ * LinkedIn URL on file — find their profile by name+company, then enrich in one shot.
+ */
+export async function searchLinkedInProfiles(searchQuery: string, maxItems = 3): Promise<any[]> {
+  if (!env.APIFY_TOKEN || !searchQuery.trim()) return [];
+  let extra: Record<string, unknown> = {};
+  if (env.APIFY_SEARCH_INPUT) {
+    try {
+      extra = JSON.parse(env.APIFY_SEARCH_INPUT);
+    } catch {
+      extra = {};
+    }
+  }
+  const input = {
+    profileScraperMode: env.APIFY_SEARCH_MODE,
+    searchQuery: searchQuery.trim(),
+    maxItems,
+    ...extra,
+  };
+  try {
+    const res = await fetch(
+      `https://api.apify.com/v2/acts/${env.APIFY_SEARCH_ACTOR_ID}/run-sync-get-dataset-items?token=${encodeURIComponent(
+        env.APIFY_TOKEN,
+      )}`,
+      { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) },
+    );
+    if (!res.ok) {
+      console.error(`[apify] search ${env.APIFY_SEARCH_ACTOR_ID} → ${res.status}`);
+      return [];
+    }
+    const data: any = await res.json();
+    return Array.isArray(data) ? data : (data?.items ?? []);
+  } catch (e) {
+    console.error("[apify] searchLinkedInProfiles", e);
+    return [];
+  }
+}
+
+/** Full name from a raw dataset item, for verifying a search match is the right person. */
+export function apifyItemName(item: any): string {
+  const p = element(item);
+  return [p?.firstName, p?.lastName].filter(Boolean).join(" ").trim();
+}
+
+/** The canonical LinkedIn profile URL from a raw dataset item. */
+export function apifyItemUrl(item: any): string | null {
+  const p = element(item);
+  if (typeof p?.linkedinUrl === "string" && p.linkedinUrl) return p.linkedinUrl;
+  if (p?.publicIdentifier) return `https://www.linkedin.com/in/${p.publicIdentifier}`;
+  return null;
+}
+
 /** The LinkedIn public slug for a raw dataset item (used only if matching back is needed). */
 export function apifyItemSlug(item: any): string | null {
   const p = element(item);
