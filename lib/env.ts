@@ -44,6 +44,14 @@ const schema = z.object({
   ENRICH_NEWS_DAYS_ONGOING: z.coerce.number().default(7),
   ENRICH_DAILY_LINKEDIN_CAP: z.coerce.number().default(120),
   ENRICH_MONTHLY_BUDGET_USD: z.coerce.number().default(40),
+
+  // Apify-powered bulk LinkedIn profile enrichment (no per-account rate limit).
+  // Set APIFY_TOKEN to enable; the actor id uses Apify's "username~actor-name" form.
+  APIFY_TOKEN: z.string().optional(),
+  APIFY_ACTOR_ID: z.string().default("harvestapi~linkedin-profile-scraper"),
+  APIFY_URLS_FIELD: z.string().default("profileUrls"),
+  APIFY_ACTOR_INPUT: z.string().optional(), // optional JSON of extra static actor input
+  APIFY_PROFILE_DAILY_CAP: z.coerce.number().default(500),
 });
 
 export const env = schema.parse(process.env);

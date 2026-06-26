@@ -9,6 +9,7 @@ import { runLinkedinPoll } from "./jobs/linkedinPoll";
 import { runMeetingsSync } from "./jobs/meetingsSync";
 import { runKpiAnalyze } from "./jobs/kpiAnalyze";
 import { runEnrichment } from "./jobs/enrichment";
+import { runApifyEnrich } from "./jobs/apifyEnrich";
 import { runRecompute } from "./jobs/recompute";
 import { runFitGrade } from "./jobs/fitGrade";
 import { runSplitContacts } from "./jobs/splitContacts";
@@ -37,6 +38,7 @@ export const JOBS: JobDef[] = [
   { name: "kpi-analyze", cron: "30 5 * * *", run: runKpiAnalyze },
   { name: "split-contacts", cron: "30 1 * * *", run: runSplitContacts },
   { name: "pitchbook-sync", cron: "45 1 * * *", run: runPitchbookSync },
+  { name: "apify-enrich", cron: "0 1 * * *", run: runApifyEnrich },
   { name: "enrichment", cron: "0 2 * * *", run: runEnrichment },
   { name: "fit-grade", cron: "30 3 * * *", run: runFitGrade },
   { name: "recompute", cron: "0 4 * * *", run: runRecompute },

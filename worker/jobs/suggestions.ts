@@ -10,6 +10,15 @@ import { getWritingStyleFor } from "@/lib/agent/style";
 
 const TRIGGER_WEIGHT = { re_engage: 0.6, job_change: 0.9, milestone: 0.8 } as const;
 
+/**
+ * Proactively open never-messaged but high-relevance imports with a first, no-agenda
+ * hello. lastContactedAt is populated ONLY from synced two-way comms, so a large share of
+ * a real network legitimately has none — those contacts would otherwise never surface.
+ * Bounded per run so the queue (and cost) stays sane; the brief still delivers ~3/day.
+ */
+const COLD_FIRST_TOUCH_FLOOR = 45;
+const MAX_COLD_FIRST_TOUCH_PER_RUN = 30;
+
 /** Detects placeholder/meta leaks like "[recent news]" or "Note: ... rewrite it". */
 function hasLeak(s: string): boolean {
   return /\[[^\]]*\]/.test(s) || /(^|\s)note:/i.test(s) || /\bneeded\b/i.test(s) || /rewrite it/i.test(s);
@@ -86,8 +95,11 @@ function priorityOf(score: number): "high" | "medium" | "low" {
  */
 export async function runSuggestions(): Promise<void> {
   const all = await db.select().from(contacts);
+  // Best-first, so the per-run cold-outreach cap queues your highest-relevance contacts.
+  all.sort((a, b) => (b.relevance ?? -1) - (a.relevance ?? -1));
   const ctxCache = new Map<string, { focus: string | null; style: string | null }>();
   let created = 0;
+  let coldCreated = 0;
 
   // Heal: a milestone suggestion must point to a live, sourced claim. Dismiss any whose
   // claims no longer exist (e.g. orphaned by an earlier purge) so we never show a "Why now"
@@ -127,13 +139,26 @@ export async function runSuggestions(): Promise<void> {
       ? Math.floor((Date.now() - new Date(c.lastContactedAt).getTime()) / 86_400_000)
       : null;
 
-    // --- Rekindle: meaningful relationship gone quiet ---
-    if (lastDays !== null && lastDays > cadence && (c.relevance ?? 0) >= 30) {
-      if (!(await alreadyPending(c.userId, c.id, "re_engage"))) {
-        const score = Math.min(1, ((c.relevance ?? 0) / 100) * TRIGGER_WEIGHT.re_engage + 0.1);
+    // --- Rekindle: keep a real relationship warm, OR open a high-relevance import we've
+    // never messaged. lastContactedAt comes only from SYNCED two-way comms, so plenty of
+    // genuine contacts have none — those still deserve a first, no-agenda hello. ---
+    if (!(await alreadyPending(c.userId, c.id, "re_engage"))) {
+      const rel = c.relevance ?? 0;
+      const warm = lastDays !== null && lastDays > cadence && rel >= 30;
+      const cold =
+        lastDays === null &&
+        rel >= COLD_FIRST_TOUCH_FLOOR &&
+        coldCreated < MAX_COLD_FIRST_TOUCH_PER_RUN &&
+        Boolean(c.company || c.role);
+      if (warm || cold) {
+        const score = warm
+          ? Math.min(1, (rel / 100) * TRIGGER_WEIGHT.re_engage + 0.1)
+          : Math.min(1, (rel / 100) * TRIGGER_WEIGHT.re_engage);
         const message = await draft({
           name: c.name,
-          trigger: `You have not connected in ${lastDays} days; reconnect to keep the relationship warm.`,
+          trigger: warm
+            ? `You have not connected in ${lastDays} days; reconnect to keep the relationship warm.`
+            : `You know them but have no recorded outreach yet; open with a warm, no-agenda hello.`,
           focus: cx.focus,
           style: cx.style,
         });
@@ -141,14 +166,17 @@ export async function runSuggestions(): Promise<void> {
           userId: c.userId,
           contactId: c.id,
           triggerType: "re_engage",
-          reason: `No touchpoint with ${c.name} in ${lastDays} days.`,
+          reason: warm
+            ? `No touchpoint with ${c.name} in ${lastDays} days.`
+            : `${c.name} is a high-relevance contact you haven't reached out to yet.`,
           draftMessage: message,
-          intentLabel: "Reconnect with a check-in",
+          intentLabel: warm ? "Reconnect with a check-in" : "Open the relationship",
           priority: priorityOf(score),
           score,
           claimIds: [],
         });
         created++;
+        if (cold) coldCreated++;
       }
     }
 

@@ -335,7 +335,7 @@ async function syncLinkedInMessages(
     const msgLists = await Promise.all(slice.map(([chatId]) => getChatMessages(chatId)));
     for (let j = 0; j < slice.length; j++) {
       const [chatId, contactId] = slice[j];
-      for (const m of (msgLists[j] ?? []).slice(0, 25)) {
+      for (const m of (msgLists[j] ?? []).slice(0, 60)) {
         if (!m?.id || !m?.timestamp) continue;
         const when = new Date(m.timestamp);
         if (isNaN(when.getTime())) continue;

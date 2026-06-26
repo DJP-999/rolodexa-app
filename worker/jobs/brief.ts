@@ -16,6 +16,64 @@ import {
 } from "@/lib/notifications/gate";
 import { sendMessage } from "@/lib/integrations/telegram";
 import { resolveChannel } from "@/lib/outreach/deliver";
+import { cadenceForRelevance } from "@/lib/scoring/relevance";
+
+function headerFor(slug: string): string {
+  return slug === "night-brief" ? "🌙 Night brief" : slug === "midday-update" ? "🔆 Midday update" : "☀️ Morning brief";
+}
+
+/**
+ * Fallback so a brief is NEVER silent: when nothing clears the gate, send a single light
+ * digest of the relationships most worth warming up (high relevance + stale or never
+ * contacted), pointing at the one-tap Reconnect button. No buttons, no daily-cap spend.
+ */
+async function sendColdDigest(userId: string, email: string, slug: string): Promise<void> {
+  const tg = (
+    await db
+      .select()
+      .from(connectedAccounts)
+      .where(and(eq(connectedAccounts.userId, userId), eq(connectedAccounts.provider, "telegram")))
+      .limit(1)
+  )[0];
+  if (!tg?.externalId) {
+    console.log(`[brief:${slug}] no telegram chat for ${email}`);
+    return;
+  }
+
+  const rows = await db.select().from(contacts).where(eq(contacts.userId, userId));
+  const cold = rows
+    .filter((c) => !c.isOrganization && (c.relevance ?? 0) >= 35)
+    .map((c) => {
+      const last = c.lastContactedAt
+        ? Math.floor((Date.now() - new Date(c.lastContactedAt).getTime()) / 86_400_000)
+        : null;
+      const cadence = cadenceForRelevance(c.relevance ?? null);
+      const stale = last === null || last > cadence;
+      const staleScore = last === null ? cadence + 30 : last - cadence;
+      return { c, last, stale, pr: (c.relevance ?? 0) + Math.max(0, staleScore) / 10 };
+    })
+    .filter((x) => x.stale)
+    .sort((a, b) => b.pr - a.pr)
+    .slice(0, 3);
+
+  if (!cold.length) {
+    console.log(`[brief:${slug}] NO_MESSAGE (network all warm) for ${email}`);
+    return;
+  }
+
+  const lines = cold.map(({ c, last }) => {
+    const meta = [c.role, c.company].filter(Boolean).join(" · ");
+    const when = last === null ? "no touch on record" : `last touch ${last}d ago`;
+    return `• ${c.name}${meta ? ` — ${meta}` : ""} (${when})`;
+  });
+  const body =
+    `${headerFor(slug)} — nothing urgent today.\n\n` +
+    `${cold.length} relationship${cold.length > 1 ? "s" : ""} worth warming up:\n` +
+    lines.join("\n") +
+    `\n\nOpen Rolodexa and tap Reconnect to send a personal note in one tap.`;
+  await sendMessage(tg.externalId, body, undefined, { plain: true });
+  console.log(`[brief:${slug}] sent cold digest (${cold.length}) to ${email}`);
+}
 
 function startOfToday(): Date {
   const d = new Date();
@@ -52,7 +110,7 @@ export async function runBrief(slug: string): Promise<void> {
       .orderBy(desc(suggestions.score))
       .limit(15);
     if (!pending.length) {
-      console.log(`[brief:${slug}] NO_MESSAGE (no pending) for ${u.email}`);
+      await sendColdDigest(u.id, u.email, slug);
       continue;
     }
 
@@ -105,7 +163,7 @@ export async function runBrief(slug: string): Promise<void> {
     }
 
     if (!passed.length) {
-      console.log(`[brief:${slug}] NO_MESSAGE (nothing cleared the gate) for ${u.email}`);
+      await sendColdDigest(u.id, u.email, slug);
       continue;
     }
 

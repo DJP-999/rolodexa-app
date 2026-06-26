@@ -41,7 +41,7 @@ export async function runLinkedinPoll(): Promise<void> {
       }
 
       const msgs = await getChatMessages(chatId);
-      for (const m of msgs.slice(0, 30)) {
+      for (const m of msgs.slice(0, 50)) {
         if (!m?.id || !m?.timestamp) continue;
         const when = new Date(m.timestamp);
         if (isNaN(when.getTime()) || when.getTime() < cutoff) continue;
