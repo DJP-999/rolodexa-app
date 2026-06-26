@@ -134,7 +134,7 @@ export async function getChats(accountId: string, after?: string): Promise<any[]
       const items: any[] = res?.items ?? res?.data ?? [];
       out.push(...items);
       cursor = res?.cursor ?? res?.paging?.cursor ?? res?.next_cursor ?? undefined;
-    } while (cursor && out.length < 500);
+    } while (cursor && out.length < 2000);
   } catch (e) {
     console.error("[unipile] getChats", e);
   }

@@ -29,27 +29,38 @@ export async function runMessageBackfill(): Promise<void> {
     const list = await db.select().from(contacts).where(eq(contacts.userId, g.userId));
     const providerToContact = new Map<string, string>();
     const nameMap = new Map<string, string>();
+    const slugToContact = new Map<string, string>();
     for (const c of list) {
       if (c.linkedinMemberId) providerToContact.set(String(c.linkedinMemberId), c.id);
       const nk = nameKey(c.name);
       if (nk) nameMap.set(nk, c.id);
+      // The LinkedIn public slug (from the profile URL) is a stable key — far more reliable
+      // than fuzzy name matching for contacts without a stored member-id.
+      const sm = (c.linkedinUrl ?? "").match(/\/in\/([^/?#]+)/i);
+      if (sm) slugToContact.set(decodeURIComponent(sm[1]).toLowerCase(), c.id);
     }
+
+    // Find a LinkedIn /in/<slug> anywhere in an object (chat or attendee), match to a contact.
+    const slugMatch = (obj: unknown): string | undefined => {
+      const m = JSON.stringify(obj ?? "").match(/\/in\/([^/?#"\\]+)/i);
+      return m ? slugToContact.get(decodeURIComponent(m[1]).toLowerCase()) : undefined;
+    };
 
     const chats = await getChats(g.externalId);
     if (!chats.length) continue;
 
-    // Phase 1: resolve by the chat's attendee provider-id.
+    // Phase 1: resolve by the chat's attendee provider-id, then by any profile slug on the chat.
     const resolved = new Map<string, string>();
     const unresolved: any[] = [];
     for (const chat of chats) {
       if (!chat?.id) continue;
       const pid = chat.attendee_provider_id ? String(chat.attendee_provider_id) : null;
-      const cid = pid ? providerToContact.get(pid) : undefined;
+      const cid = (pid ? providerToContact.get(pid) : undefined) ?? slugMatch(chat);
       if (cid) resolved.set(String(chat.id), cid);
       else unresolved.push(chat);
     }
 
-    // Phase 2: look up attendees (parallel) and match by provider-id or NAME.
+    // Phase 2: look up attendees (parallel) and match by provider-id, profile SLUG, then name.
     for (let i = 0; i < unresolved.length; i += 10) {
       const slice = unresolved.slice(i, i + 10);
       const lists = await Promise.all(slice.map((c) => getChatAttendees(String(c.id))));
@@ -60,6 +71,11 @@ export async function runMessageBackfill(): Promise<void> {
           const byId = apid ? providerToContact.get(apid) : undefined;
           if (byId) {
             resolved.set(String(chat.id), byId);
+            break;
+          }
+          const bySlug = slugMatch(a);
+          if (bySlug) {
+            resolved.set(String(chat.id), bySlug);
             break;
           }
           const anm =
