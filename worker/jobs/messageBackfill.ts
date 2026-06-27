@@ -4,6 +4,7 @@ import { connectedAccounts, contacts, interactions } from "@/db/schema";
 import { getChatAttendees, getChatMessages, getChats, unipileConfigured } from "@/lib/integrations/unipile";
 import { nameKey } from "@/lib/match/entity";
 import { env } from "@/lib/env";
+import { runRecompute } from "./recompute";
 
 const PER_CHAT = 80; // deep history per conversation (the poll handles recency)
 
@@ -163,4 +164,8 @@ export async function runMessageBackfill(): Promise<void> {
       }
     }
   }
+
+  // Surface the freshly-logged history: lastContactedAt is derived (max occurredAt over a
+  // contact's interactions), so recompute makes the "Last interaction" column reflect the backfill.
+  await runRecompute();
 }
