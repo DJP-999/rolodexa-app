@@ -92,15 +92,17 @@ export async function runEmailPoll(): Promise<void> {
           sentId ? "found" : "NONE"
         } received=${received.length} sent=${sentMail.length}`,
       );
+      for (const e of sentMail) if (e) e.__sent = true; // tag so the loop knows it's outbound
       const byId = new Map<string, any>();
       for (const e of [...received, ...sentMail]) {
-        const k = e?.id ?? e?.message_id;
-        if (k) byId.set(String(k), e);
+        const k =
+          e?.id ?? e?.message_id ?? e?.provider_id ?? `${e?.__sent ? "s" : "r"}:${e?.subject ?? ""}:${e?.date ?? e?.timestamp ?? ""}`;
+        byId.set(String(k), e);
       }
       const emails = [...byId.values()];
       for (const e of emails) {
-        const id = e?.id ?? e?.message_id;
-        const dateRaw = e?.date ?? e?.timestamp ?? e?.received_date;
+        const id = e?.id ?? e?.message_id ?? e?.provider_id ?? null;
+        const dateRaw = e?.date ?? e?.timestamp ?? e?.received_date ?? e?.sent_date;
         const when = dateRaw ? new Date(dateRaw) : null;
         if (!id || !when || isNaN(when.getTime()) || when.getTime() < cutoff) continue;
 
@@ -109,9 +111,12 @@ export async function runEmailPoll(): Promise<void> {
         const tos = rawTo
           .map(attEmail)
           .filter((x): x is { email: string; name: string | null } => !!x);
-        if (!from) continue;
 
-        const outbound = self.has(from.email);
+        // Sent-folder mail is ALWAYS outbound; its `from` may be omitted (implied = you), so we
+        // don't require it — the counterparty is the recipient.
+        const isSent = !!e.__sent;
+        const outbound = isSent || (from ? self.has(from.email) : false);
+        if (!outbound && !from) continue;
         const other = outbound ? tos.find((t) => !self.has(t.email)) ?? tos[0] ?? null : from;
         if (!other) continue;
 
