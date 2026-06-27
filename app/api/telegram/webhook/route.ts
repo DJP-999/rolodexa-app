@@ -10,7 +10,7 @@ import {
   messageLog,
 } from "@/db/schema";
 import { env } from "@/lib/env";
-import { answerCallback, sendMessage } from "@/lib/integrations/telegram";
+import { answerCallback, finishCard, sendMessage } from "@/lib/integrations/telegram";
 import { deliverOutreach, resolveChannel } from "@/lib/outreach/deliver";
 import { SNOOZE_DAYS } from "@/lib/outreach/suppress";
 import { APPROVE_BUTTONS, handleContactAction, handleDexaText } from "@/lib/agent/telegram";
@@ -60,13 +60,15 @@ export async function POST(req: Request) {
     const cb = body.callback_query;
     if (cb?.data) {
       const chatId = String(cb.message?.chat?.id ?? cb.from?.id ?? "");
+      const messageId: number | undefined = cb.message?.message_id;
+      const origText: string = cb.message?.text ?? "";
       const [action, id] = String(cb.data).split(":");
       const primaryUser = (await db.select().from(users).limit(1))[0];
 
       // Contact-card actions (from chat replies / the digest) operate on a CONTACT id, and don't
       // require a pre-existing suggestion — handle them up front.
       if (primaryUser && CONTACT_ACTIONS.includes(action)) {
-        await handleContactAction(primaryUser.id, action, id, chatId, cb.id);
+        await handleContactAction(primaryUser.id, action, id, chatId, cb.id, messageId, origText);
         return NextResponse.json({ ok: true });
       }
 
@@ -107,11 +109,13 @@ export async function POST(req: Request) {
               ? "Dismissed — won't resurface unless there's fresh news ✓"
               : "Blocked — no more updates on this person 🚫";
         await answerCallback(cb.id, note);
+        await finishCard(chatId, messageId, origText, `${action === "snooze" ? "😴 Snoozed for 1 month" : action === "dismiss" ? "✕ Dismissed" : "🚫 Blocked"}`);
         return NextResponse.json({ ok: true });
       }
 
       if (s.status === "sent" || s.status === "dismissed") {
         await answerCallback(cb.id, `Already ${s.status}.`);
+        await finishCard(chatId, messageId, origText, `(already ${s.status})`);
         return NextResponse.json({ ok: true });
       }
 
@@ -129,6 +133,7 @@ export async function POST(req: Request) {
               ? "Will send via email"
               : "No channel on file — open Rolodexa to send manually";
         await answerCallback(cb.id, "Here's the draft");
+        await finishCard(chatId, messageId, origText, "✍️ Reach out — draft below");
         if (chatId)
           await sendMessage(
             chatId,
@@ -141,6 +146,7 @@ export async function POST(req: Request) {
 
       if (action === "cancel") {
         await answerCallback(cb.id, "Cancelled — nothing sent.");
+        await finishCard(chatId, messageId, origText, "✕ Cancelled");
         return NextResponse.json({ ok: true });
       }
 
@@ -161,16 +167,10 @@ export async function POST(req: Request) {
             .set({ outcome: "approved", outcomeAt: new Date() })
             .where(eq(notificationEvents.suggestionId, s.id));
           await answerCallback(cb.id, `Sent via ${result.channel} ✓`);
-          if (chatId) await sendMessage(chatId, `✅ Sent to ${contact?.name ?? "contact"} via ${result.channel}.`, undefined, { plain: true });
+          await finishCard(chatId, messageId, origText, `✅ Sent via ${result.channel}`);
         } else {
           await answerCallback(cb.id, "Couldn't auto-send — open it in the app.");
-          if (chatId)
-            await sendMessage(
-              chatId,
-              `⚠️ Couldn't send to ${contact?.name ?? "contact"} automatically (${result.detail}). Open Rolodexa to send it manually.`,
-              undefined,
-              { plain: true },
-            );
+          await finishCard(chatId, messageId, origText, `⚠️ Couldn't auto-send (${result.detail}) — open Rolodexa to send.`);
         }
         return NextResponse.json({ ok: true });
       }
@@ -178,6 +178,7 @@ export async function POST(req: Request) {
       if (action === "edit") {
         await setPendingEdit(s.userId, s.id);
         await answerCallback(cb.id, "Send me your edited version.");
+        await finishCard(chatId, messageId, origText, "✏️ Editing — send me your version");
         if (chatId)
           await sendMessage(
             chatId,
@@ -198,6 +199,7 @@ export async function POST(req: Request) {
           .set({ outcome: "dismissed", outcomeAt: new Date() })
           .where(eq(notificationEvents.suggestionId, s.id));
         await answerCallback(cb.id, "Declined ✓");
+        await finishCard(chatId, messageId, origText, "✕ Declined");
         return NextResponse.json({ ok: true });
       }
 

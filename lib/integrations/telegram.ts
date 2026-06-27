@@ -41,6 +41,47 @@ export async function sendMessage(
   return ok;
 }
 
+/** Replace a message's text and inline keyboard (pass no buttons to REMOVE the keyboard). */
+export async function editMessage(
+  chatId: string,
+  messageId: number,
+  text: string,
+  buttons?: ApprovalButton[],
+  opts?: { plain?: boolean },
+): Promise<void> {
+  if (!isConfigured("telegram")) return;
+  const reply_markup = {
+    inline_keyboard: buttons && buttons.length ? [buttons.map((b) => ({ text: b.label, callback_data: b.data }))] : [],
+  };
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/editMessageText`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        message_id: messageId,
+        text,
+        ...(opts?.plain ? {} : { parse_mode: "Markdown" }),
+        reply_markup,
+      }),
+    });
+    if (!res.ok) console.error(`[telegram] editMessage → ${res.status}`);
+  } catch (e) {
+    console.error("[telegram] editMessage", e);
+  }
+}
+
+/** After a card action: strip the buttons and append a status line so it's clearly resolved. */
+export async function finishCard(
+  chatId: string,
+  messageId: number | undefined,
+  origText: string,
+  status: string,
+): Promise<void> {
+  if (!messageId) return;
+  await editMessage(chatId, messageId, `${origText}\n\n${status}`.trim(), undefined, { plain: true });
+}
+
 export async function answerCallback(callbackId: string, text?: string): Promise<void> {
   if (!isConfigured("telegram")) return;
   await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/answerCallbackQuery`, {

@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { contacts, suggestions, userContext } from "@/db/schema";
-import { answerCallback, sendMessage, type ApprovalButton } from "@/lib/integrations/telegram";
+import { answerCallback, finishCard, sendMessage, type ApprovalButton } from "@/lib/integrations/telegram";
 import { resolveChannel } from "@/lib/outreach/deliver";
 import { SNOOZE_DAYS } from "@/lib/outreach/suppress";
 import { buildAgentContext } from "@/lib/agent/context";
@@ -126,32 +126,39 @@ export async function handleContactAction(
   contactId: string,
   chatId: string,
   callbackId: string,
+  messageId?: number,
+  origText = "",
 ): Promise<void> {
   const c = (
     await db.select().from(contacts).where(and(eq(contacts.id, contactId), eq(contacts.userId, userId))).limit(1)
   )[0];
   if (!c) {
     await answerCallback(callbackId, "That contact is no longer available.");
+    await finishCard(chatId, messageId, origText, "(no longer available)");
     return;
   }
 
   if (action === "snoozeC") {
     await db.update(contacts).set({ outreachSnoozedUntil: new Date(Date.now() + SNOOZE_DAYS * 86_400_000) }).where(eq(contacts.id, c.id));
     await answerCallback(callbackId, `Snoozed ${c.name} for 1 month 😴`);
+    await finishCard(chatId, messageId, origText, "😴 Snoozed for 1 month");
     return;
   }
   if (action === "dismissC") {
     await db.update(contacts).set({ outreachDismissedAt: new Date() }).where(eq(contacts.id, c.id));
     await answerCallback(callbackId, `Dismissed ${c.name} ✓`);
+    await finishCard(chatId, messageId, origText, "✕ Dismissed");
     return;
   }
   if (action === "blockC") {
     await db.update(contacts).set({ outreachBlocked: true }).where(eq(contacts.id, c.id));
     await answerCallback(callbackId, `Blocked — no more updates on ${c.name} 🚫`);
+    await finishCard(chatId, messageId, origText, "🚫 Blocked — no more updates");
     return;
   }
   if (action === "reachC") {
     await answerCallback(callbackId, "Drafting…");
+    await finishCard(chatId, messageId, origText, "✍️ Reach out — drafting below…");
     const sid = await createDraftSuggestion(c);
     const draft = sid
       ? (await db.select({ d: suggestions.draftMessage }).from(suggestions).where(eq(suggestions.id, sid)).limit(1))[0]?.d
