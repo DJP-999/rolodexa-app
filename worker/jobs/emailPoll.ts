@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { connectedAccounts, contacts, interactions } from "@/db/schema";
 import { env, isConfigured } from "@/lib/env";
@@ -127,6 +127,16 @@ export async function runEmailPoll(): Promise<void> {
           console.log(`[emailPoll-find] contactByEmail=${JSON.stringify(byEmail)}`);
           console.log(`[emailPoll-find] nameMatches(${likeName})=${JSON.stringify(byName.map((r) => ({ ...r, email: JSON.stringify(r.email) })))}`);
           console.log(`[emailPoll-find] existingInteractions=${JSON.stringify(ix)}`);
+          // Also look up by the matched message's sourceRef (its id) — a stale row keyed on this
+          // ref but attributed to a different counterparty is what onConflictDoNothing used to freeze.
+          const refIds = hits.map((e) => String(e?.id ?? e?.message_id ?? e?.provider_id ?? "")).filter(Boolean);
+          if (refIds.length) {
+            const byRef = await db
+              .select({ id: interactions.id, contactId: interactions.contactId, cold: interactions.coldProspectId, dir: interactions.direction, cpe: interactions.counterpartyEmail, ref: interactions.sourceRef, at: interactions.occurredAt })
+              .from(interactions)
+              .where(and(eq(interactions.userId, g.userId), inArray(interactions.sourceRef, refIds)));
+            console.log(`[emailPoll-find] bySourceRef=${JSON.stringify(byRef)}`);
+          }
         } catch (err) {
           console.log(`[emailPoll-find] db probe error: ${String(err)}`);
         }

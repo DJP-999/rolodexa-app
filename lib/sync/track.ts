@@ -199,6 +199,11 @@ export async function logTouch(t: TouchInput): Promise<{ contactId: string | nul
 
   const isReply = await detectReply(t);
 
+  // Upsert on the idempotency key (userId, channel, sourceRef). We UPDATE rather than
+  // DoNothing so a re-poll CORRECTS a previously mis-attributed row — e.g. one written before
+  // the mailbox's own address was known, when an outbound email looked inbound and got pinned to
+  // the wrong counterparty. With DoNothing that first wrong row was frozen forever and the right
+  // attribution could never land. Only refresh the resolved/derived fields; keep the row's id.
   await db
     .insert(interactions)
     .values({
@@ -216,7 +221,20 @@ export async function logTouch(t: TouchInput): Promise<{ contactId: string | nul
       coldProspectId: coldId,
       metadata: { subject: t.subject ?? null, text: t.text ? t.text.slice(0, 1200) : null },
     })
-    .onConflictDoNothing();
+    .onConflictDoUpdate({
+      target: [interactions.userId, interactions.channel, interactions.sourceRef],
+      set: {
+        contactId,
+        coldProspectId: coldId,
+        direction: t.direction,
+        eventType: t.eventType,
+        occurredAt: t.occurredAt,
+        threadId: t.threadId ?? null,
+        isReply,
+        counterpartyEmail: normEmail(t.counterpartyEmail) || null,
+        counterpartyName: t.counterpartyName ?? null,
+      },
+    });
 
   return { contactId, coldProspectId: coldId };
 }
