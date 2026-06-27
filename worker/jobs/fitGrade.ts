@@ -95,11 +95,24 @@ async function persist(updates: { id: string; fit: number; summary: string; rati
   }
 }
 
+/** Grade the contacts the user cares about FIRST — investors, high-value, then high
+ *  relevance/fit — with a boost for never-graded contacts so brand-new imports still surface
+ *  early. So a long pass updates the important people in the first minute, not the last. */
+function gradePriority(c: Contact): number {
+  return (
+    (c.relationship === "investor" ? 1000 : 0) +
+    (c.highValue ? 500 : 0) +
+    (c.professionalFit == null ? 300 : 0) +
+    (c.relevance ?? 0) +
+    (c.professionalFit ?? 0) * 100
+  );
+}
+
 /**
- * Re-score domain/thesis fit for ALL contacts, then re-grade relevance. Hardened to be
- * resumable: contacts are ordered stalest-first (ungraded, then oldest gradedAt) and each
- * round is PERSISTED immediately — so a deploy/restart mid-run never loses prior progress,
- * and a later run simply continues with whoever is still stale.
+ * Re-score domain/thesis fit for ALL contacts, then re-grade relevance. Resumable: each round
+ * is PERSISTED immediately, so a deploy/restart mid-run never loses prior progress. Ordered
+ * IMPORTANCE-first (investors / high relevance / high fit) so the contacts the user actually
+ * watches re-grade at the start of the pass rather than the end.
  */
 export async function runFitGrade(): Promise<void> {
   const us = await db.select().from(userContext);
@@ -107,13 +120,7 @@ export async function runFitGrade(): Promise<void> {
   const all = await db.select().from(contacts);
   const people = all.filter((c) => !c.isOrganization);
 
-  // Stalest first: ungraded (null fit) before graded, then oldest gradedAt.
-  people.sort((a, b) => {
-    const af = a.professionalFit == null ? 0 : 1;
-    const bf = b.professionalFit == null ? 0 : 1;
-    if (af !== bf) return af - bf;
-    return (a.gradedAt ? new Date(a.gradedAt).getTime() : 0) - (b.gradedAt ? new Date(b.gradedAt).getTime() : 0);
-  });
+  people.sort((a, b) => gradePriority(b) - gradePriority(a));
 
   const byUser = new Map<string, Contact[]>();
   for (const c of people) (byUser.get(c.userId) ?? byUser.set(c.userId, []).get(c.userId)!).push(c);
