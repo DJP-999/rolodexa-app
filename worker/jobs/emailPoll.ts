@@ -92,6 +92,16 @@ export async function runEmailPoll(): Promise<void> {
           sentId ? "found" : "NONE"
         } received=${received.length} sent=${sentMail.length}`,
       );
+      if (sentMail[0]) {
+        const s0 = sentMail[0];
+        console.log(
+          `[emailPoll-debug] sent[0] keys=${Object.keys(s0).join("|")} id=${s0.id ?? s0.message_id ?? s0.provider_id} date=${
+            s0.date ?? s0.timestamp ?? s0.sent_date ?? s0.received_date
+          } from=${JSON.stringify(s0.from_attendee ?? s0.from)?.slice(0, 120)} to=${JSON.stringify(
+            s0.to_attendees ?? s0.to,
+          )?.slice(0, 160)}`,
+        );
+      }
       for (const e of sentMail) if (e) e.__sent = true; // tag so the loop knows it's outbound
       const byId = new Map<string, any>();
       for (const e of [...received, ...sentMail]) {
