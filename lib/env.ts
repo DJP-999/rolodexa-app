@@ -63,7 +63,10 @@ const schema = z.object({
   // How deep the message backfill paginates the LinkedIn inbox. Newest-first, so older
   // relationships (most of the rolodex) need a high ceiling to be reached.
   MESSAGE_BACKFILL_CHAT_CAP: z.coerce.number().default(8000),
-  MESSAGE_BACKFILL_ATTENDEE_LOOKUPS: z.coerce.number().default(800),
+  // Look up attendees for ALL fetched chats (not just the first 800), so every conversation gets
+  // the reliable slug/name match. Most chats carry neither a member-id nor a slug on the chat
+  // object itself, so without this the bulk of conversations never attribute to a contact.
+  MESSAGE_BACKFILL_ATTENDEE_LOOKUPS: z.coerce.number().default(8000),
   // How many recent emails the 30-min poll paginates through (across all folders incl. Sent),
   // so a busy mailbox doesn't truncate recent mail to a single 250-item page.
   EMAIL_POLL_CAP: z.coerce.number().default(1500),
