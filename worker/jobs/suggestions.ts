@@ -2,6 +2,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { claims, contacts, suggestions, userContext } from "@/db/schema";
 import { cadenceForRelevance } from "@/lib/scoring/relevance";
+import { outreachSuppressed } from "@/lib/outreach/suppress";
 import { isNews } from "@/lib/provenance/claims";
 import { mentionsContact } from "@/lib/match/entity";
 import { complete } from "@/lib/llm";
@@ -123,6 +124,11 @@ export async function runSuggestions(): Promise<void> {
 
   for (const c of all) {
     if (c.isOrganization) continue;
+    // Respect the Telegram controls: blocked/snoozed mute everything; dismissed mutes only the
+    // non-news check-in (re_engage), so a real news moment can still surface.
+    const checkinMuted = outreachSuppressed(c, false).suppressed;
+    const newsMuted = outreachSuppressed(c, true).suppressed;
+    if (checkinMuted && newsMuted) continue;
 
     let cx = ctxCache.get(c.userId);
     if (!cx) {
@@ -142,7 +148,7 @@ export async function runSuggestions(): Promise<void> {
     // --- Rekindle: keep a real relationship warm, OR open a high-relevance import we've
     // never messaged. lastContactedAt comes only from SYNCED two-way comms, so plenty of
     // genuine contacts have none — those still deserve a first, no-agenda hello. ---
-    if (!(await alreadyPending(c.userId, c.id, "re_engage"))) {
+    if (!checkinMuted && !(await alreadyPending(c.userId, c.id, "re_engage"))) {
       const rel = c.relevance ?? 0;
       const warm = lastDays !== null && lastDays > cadence && rel >= 30;
       const cold =
@@ -180,7 +186,8 @@ export async function runSuggestions(): Promise<void> {
       }
     }
 
-    // --- News / job-change: a fresh, dated, sourced moment ---
+    // --- News / job-change: a fresh, dated, sourced moment (still allowed after a dismiss) ---
+    if (newsMuted) continue;
     const cl = await db.select().from(claims).where(eq(claims.contactId, c.id));
     const fresh = cl
       .filter((x) => isNews(x))

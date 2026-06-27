@@ -2,7 +2,7 @@
 
 import { Fragment, useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { ChevronDown, ArrowRight, Loader2, SlidersHorizontal, Pencil } from "lucide-react";
+import { ChevronDown, ArrowRight, Loader2, SlidersHorizontal, Pencil, Info } from "lucide-react";
 import DeleteContactButton from "./DeleteContactButton";
 import VipToggle from "./VipToggle";
 import ReconnectButton from "./ReconnectButton";
@@ -46,6 +46,25 @@ const CORE: { key: string; label: string }[] = [
   { key: "days", label: "Days" },
 ];
 const DEFAULT_VISIBLE = ["company", "email", "linkedin", "industry", "relationship", "fit", "relevance"];
+
+// Plain-English explanations shown on hover next to the column header.
+const COLUMN_HELP: Record<string, string> = {
+  fit: "How well this contact and their firm match YOUR deal focus — graded by AI from their LinkedIn profile, live web research on their current firm, and your own notes. It's about who they are, regardless of your history together.",
+  relevance:
+    "How much to prioritize this person right now. A weighted blend of Fit (the biggest factor), how recently you last connected, your relationship strength, and reply likelihood. This is what ranks your rolodex — and a high Fit floors Relevance high even with no past contact.",
+};
+
+/** A small "i" that reveals an explanation on hover. Stops clicks from triggering a column sort. */
+function InfoTip({ text }: { text: string }) {
+  return (
+    <span className="group/info relative inline-flex align-middle" onClick={(e) => e.stopPropagation()}>
+      <Info className="h-3 w-3 text-muted/70 hover:text-ink" />
+      <span className="pointer-events-none absolute left-1/2 top-5 z-30 hidden w-64 -translate-x-1/2 whitespace-normal rounded-lg border border-hairline bg-white p-2.5 text-[11px] font-normal leading-snug text-ink shadow-lg group-hover/info:block">
+        {text}
+      </span>
+    </span>
+  );
+}
 const STORAGE_KEY = "rolodexa.contactCols";
 const ORDER_KEY = "rolodexa.contactOrder";
 const SORT_KEY = "rolodexa.contactSort";
@@ -384,6 +403,31 @@ export function ContactsTable({
       return f.multi ? val.split(" | ").includes(sel) : val === sel;
     }),
   );
+  // Default view CLUSTERS contacts by firm: a firm is ranked by its strongest member, and all
+  // of its people sit together as a block (best-graded first within the firm). So colleagues at
+  // the same firm — e.g. InGoodCompany's Tim Ringel / Gilles Bouillot / Julius Ewig — appear
+  // adjacent, instead of scattered across the list by tiny per-person score differences.
+  const firmKey = (r: Row) => (r.company ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const clusterByFirm = (list: Row[]): Row[] => {
+    const rank = new Map<string, number>();
+    for (const r of list) {
+      const k = firmKey(r);
+      if (!k) continue;
+      rank.set(k, Math.max(rank.get(k) ?? -Infinity, r.relevance ?? -1));
+    }
+    const firmRank = (r: Row) => {
+      const k = firmKey(r);
+      return k ? rank.get(k)! : r.relevance ?? -1;
+    };
+    return [...list].sort((a, b) => {
+      const fr = firmRank(b) - firmRank(a); // firms (and lone contacts) by best rank, desc
+      if (fr !== 0) return fr;
+      const ka = firmKey(a);
+      const kb = firmKey(b);
+      if (ka !== kb) return ka.localeCompare(kb); // keep one firm's people together
+      return (b.relevance ?? -1) - (a.relevance ?? -1); // best-graded first within the firm
+    });
+  };
   const sorted = sort
     ? [...filtered].sort((a, b) => {
         const av = sortVal(a, sort.key);
@@ -400,7 +444,7 @@ export function ContactsTable({
         }
         return sort.dir === "asc" ? c : -c;
       })
-    : filtered;
+    : clusterByFirm(filtered);
 
   const toggleRow = async (id: string) => {
     if (open === id) return setOpen(null);
@@ -614,8 +658,11 @@ export function ContactsTable({
                   title="Click to sort · drag to reorder"
                   className="cursor-pointer select-none whitespace-nowrap px-3 py-3 font-normal hover:text-ink"
                 >
-                  {labelOf(c)}
-                  {sort?.key === c.key ? (sort.dir === "asc" ? " ↑" : " ↓") : ""}
+                  <span className="inline-flex items-center gap-1">
+                    {labelOf(c)}
+                    {COLUMN_HELP[c.key] && <InfoTip text={COLUMN_HELP[c.key]} />}
+                    {sort?.key === c.key ? (sort.dir === "asc" ? " ↑" : " ↓") : ""}
+                  </span>
                 </th>
               ))}
             </tr>

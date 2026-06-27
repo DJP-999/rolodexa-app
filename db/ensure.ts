@@ -145,5 +145,9 @@ export async function ensureSchema(sql: {
     "summary" text,
     "updated_at" timestamptz NOT NULL DEFAULT now()
   )`);
+  // Per-contact Telegram outreach controls (block / dismiss / snooze).
+  await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "outreach_blocked" boolean DEFAULT false`);
+  await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "outreach_dismissed_at" timestamptz`);
+  await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "outreach_snoozed_until" timestamptz`);
   console.log("[db] ensureSchema applied.");
 }

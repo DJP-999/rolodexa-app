@@ -52,7 +52,7 @@ const schema = z.object({
   NEWS_SCAN_BATCH: z.coerce.number().default(60),
   // Max NEW firms to web-research per fit-grade run (cached firms are free). Bounds Exa+LLM
   // cost; coverage converges across runs as the per-firm cache fills. Investors first.
-  FIRM_RESEARCH_CAP: z.coerce.number().default(150),
+  FIRM_RESEARCH_CAP: z.coerce.number().default(300),
   // Set to a contact's name to print targeted diagnostics in the message-backfill job
   // (does their chat exist in the synced set, and why did/didn't it attribute). Leave unset normally.
   DEBUG_BACKFILL_NAME: z.string().optional(),

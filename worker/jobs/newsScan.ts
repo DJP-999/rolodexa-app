@@ -15,7 +15,7 @@ import {
 } from "@/lib/notifications/gate";
 import { env } from "@/lib/env";
 import { sendMessage } from "@/lib/integrations/telegram";
-import { resolveChannel } from "@/lib/outreach/deliver";
+import { outreachSuppressed } from "@/lib/outreach/suppress";
 import { webNewsPass, xNewsPass } from "./enrichment";
 import { runSuggestions } from "./suggestions";
 
@@ -167,6 +167,8 @@ async function pushBreaking(userId: string): Promise<void> {
       : undefined;
     if (!contact) continue;
     if (!(contact.highValue || (contact.relevance ?? 0) >= 70)) continue;
+    // News still surfaces after a Dismiss, but Block/Snooze mute even breaking pings.
+    if (outreachSuppressed(contact, true).suppressed) continue;
 
     const g = notificationGate(
       { ...baseCtx, sentToday: sent },
@@ -184,22 +186,18 @@ async function pushBreaking(userId: string): Promise<void> {
       await db.select().from(claims).where(inArray(claims.id, s.claimIds)).limit(5)
     ).find((c) => c.sourceUrl);
     const src = claim?.sourceUrl ? `\n${claim.sourceUrl}` : "";
-    const channel = await resolveChannel(contact);
-    const via =
-      channel === "linkedin"
-        ? "Approve → sends as a LinkedIn DM"
-        : channel === "email"
-          ? "Approve → sends via email"
-          : "No channel on file — open in app to send";
-    const message = `⚡ Heads up — ${contact.name}\n${s.reason}${src}\n\n${s.draftMessage ?? ""}\n\n${via}`;
+    // First stage, same as the brief: the moment + four controls. The draft + channel are
+    // revealed only when the user taps Reach out.
+    const message = `⚡ Heads up — ${contact.name}\n${s.reason}${src}`;
 
     const ok = await sendMessage(
       tg.externalId,
       message,
       [
-        { label: "✅ Approve & send", data: `approve:${s.id}` },
-        { label: "✏️ Edit", data: `edit:${s.id}` },
-        { label: "✕ Decline", data: `decline:${s.id}` },
+        { label: "✍️ Reach out", data: `reach:${s.id}` },
+        { label: "😴 Snooze", data: `snooze:${s.id}` },
+        { label: "✕ Dismiss", data: `dismiss:${s.id}` },
+        { label: "🚫 Block", data: `block:${s.id}` },
       ],
       { plain: true },
     );

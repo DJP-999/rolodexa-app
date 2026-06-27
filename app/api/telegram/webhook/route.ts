@@ -11,14 +11,16 @@ import {
 } from "@/db/schema";
 import { env } from "@/lib/env";
 import { answerCallback, sendMessage } from "@/lib/integrations/telegram";
-import { deliverOutreach } from "@/lib/outreach/deliver";
+import { deliverOutreach, resolveChannel } from "@/lib/outreach/deliver";
+import { SNOOZE_DAYS } from "@/lib/outreach/suppress";
 
 export const dynamic = "force-dynamic";
 
+// Second stage (shown after "Reach out"): the actual send controls for the drafted message.
 const APPROVE_BUTTONS = (id: string) => [
   { label: "✅ Approve & send", data: `approve:${id}` },
   { label: "✏️ Edit", data: `edit:${id}` },
-  { label: "✕ Decline", data: `decline:${id}` },
+  { label: "✕ Cancel", data: `cancel:${id}` },
 ];
 
 async function setPendingEdit(userId: string, suggestionId: string | null): Promise<void> {
@@ -71,8 +73,69 @@ export async function POST(req: Request) {
         await answerCallback(cb.id, "That item is no longer available.");
         return NextResponse.json({ ok: true });
       }
+
+      // --- Contact controls (handled BEFORE the sent/dismissed guard so Block still applies
+      // even if the item was already dismissed). These set per-contact flags that suppress
+      // future updates, per the user's rules. ---
+      if (action === "snooze" || action === "dismiss" || action === "block") {
+        if (s.contactId) {
+          const patch =
+            action === "snooze"
+              ? { outreachSnoozedUntil: new Date(Date.now() + SNOOZE_DAYS * 86_400_000) }
+              : action === "dismiss"
+                ? { outreachDismissedAt: new Date() }
+                : { outreachBlocked: true };
+          await db.update(contacts).set(patch).where(eq(contacts.id, s.contactId));
+        }
+        await db
+          .update(suggestions)
+          .set({ status: action === "snooze" ? "snoozed" : "dismissed", updatedAt: new Date() })
+          .where(eq(suggestions.id, s.id));
+        await db
+          .update(notificationEvents)
+          .set({ outcome: action === "snooze" ? "snoozed" : "dismissed", outcomeAt: new Date() })
+          .where(eq(notificationEvents.suggestionId, s.id));
+        const note =
+          action === "snooze"
+            ? "Snoozed for 1 month 😴"
+            : action === "dismiss"
+              ? "Dismissed — won't resurface unless there's fresh news ✓"
+              : "Blocked — no more updates on this person 🚫";
+        await answerCallback(cb.id, note);
+        return NextResponse.json({ ok: true });
+      }
+
       if (s.status === "sent" || s.status === "dismissed") {
         await answerCallback(cb.id, `Already ${s.status}.`);
+        return NextResponse.json({ ok: true });
+      }
+
+      // "Reach out" → reveal the drafted message and which channel it will go out on, with the
+      // Approve / Edit / Cancel controls. The draft was prepared when the suggestion was created.
+      if (action === "reach") {
+        const contact = s.contactId
+          ? (await db.select().from(contacts).where(eq(contacts.id, s.contactId)).limit(1))[0]
+          : undefined;
+        const channel = contact ? await resolveChannel(contact) : null;
+        const via =
+          channel === "linkedin"
+            ? "Will send as a LinkedIn DM"
+            : channel === "email"
+              ? "Will send via email"
+              : "No channel on file — open Rolodexa to send manually";
+        await answerCallback(cb.id, "Here's the draft");
+        if (chatId)
+          await sendMessage(
+            chatId,
+            `Draft to ${contact?.name ?? "contact"} — ${via}:\n\n${s.draftMessage ?? ""}`,
+            APPROVE_BUTTONS(s.id),
+            { plain: true },
+          );
+        return NextResponse.json({ ok: true });
+      }
+
+      if (action === "cancel") {
+        await answerCallback(cb.id, "Cancelled — nothing sent.");
         return NextResponse.json({ ok: true });
       }
 

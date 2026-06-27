@@ -51,9 +51,15 @@ function buildFitInput(c: Contact, firmMap?: Map<string, string>): FitInput {
   };
 }
 
-/** Investor/high-value contacts first, so the firm-research budget is spent where it matters. */
+/** Research firms of the most valuable contacts first: investors, then high relevance/fit, so
+ *  on-thesis firms get a brief even when the per-run cap can't cover the whole long tail. */
 function firmPriority(c: Contact): number {
-  return (c.relationship === "investor" ? 2 : 0) + (c.highValue ? 1 : 0);
+  return (
+    (c.relationship === "investor" ? 2 : 0) +
+    (c.highValue ? 1 : 0) +
+    (c.relevance ?? 0) / 100 +
+    (c.professionalFit ?? 0)
+  );
 }
 
 function focusFor(ctx: typeof userContext.$inferSelect | undefined): UserFocus {

@@ -15,7 +15,7 @@ import {
   type GateContext,
 } from "@/lib/notifications/gate";
 import { sendMessage } from "@/lib/integrations/telegram";
-import { resolveChannel } from "@/lib/outreach/deliver";
+import { outreachSuppressed, isNewsTrigger } from "@/lib/outreach/suppress";
 import { cadenceForRelevance } from "@/lib/scoring/relevance";
 
 function headerFor(slug: string): string {
@@ -42,7 +42,8 @@ async function sendColdDigest(userId: string, email: string, slug: string): Prom
 
   const rows = await db.select().from(contacts).where(eq(contacts.userId, userId));
   const cold = rows
-    .filter((c) => !c.isOrganization && (c.relevance ?? 0) >= 35)
+    // Cold digest is a check-in nudge (non-news), so honor block/snooze/dismiss here too.
+    .filter((c) => !c.isOrganization && (c.relevance ?? 0) >= 35 && !outreachSuppressed(c, false).suppressed)
     .map((c) => {
       const last = c.lastContactedAt
         ? Math.floor((Date.now() - new Date(c.lastContactedAt).getTime()) / 86_400_000)
@@ -149,6 +150,8 @@ export async function runBrief(slug: string): Promise<void> {
       const contact = s.contactId
         ? (await db.select().from(contacts).where(eq(contacts.id, s.contactId)).limit(1))[0]
         : undefined;
+      // Respect the Telegram controls (block / snooze / dismiss) before spending a nudge slot.
+      if (contact && outreachSuppressed(contact, isNewsTrigger(s.triggerType)).suppressed) continue;
       const g = notificationGate(
         { ...baseCtx, sentToday: sentToday + passed.length },
         {
@@ -195,24 +198,18 @@ export async function runBrief(slug: string): Promise<void> {
       const claim = (s.claimIds ?? []).map((id) => claimById.get(id)).find((x) => x?.sourceUrl);
       const when = claim ? shortDate(claim.publishedDate ?? claim.eventDate) : "";
       const srcLine = claim?.sourceUrl ? `\n${when ? `${when} · ` : ""}${claim.sourceUrl}` : "";
-      const channel = c ? await resolveChannel(c) : null;
-      const via =
-        channel === "linkedin"
-          ? "Approve → sends as a LinkedIn DM"
-          : channel === "email"
-            ? "Approve → sends via email"
-            : "No channel on file — open in app to send";
       const meta = [c?.role, c?.company].filter(Boolean).join(" · ");
-      const itemText =
-        `${c?.name ?? "Contact"}${meta ? ` — ${meta}` : ""}\n${s.reason}${srcLine}\n\n` +
-        `${s.draftMessage ?? ""}\n\n${via}`;
+      // First stage: the update + four controls. The draft + channel are only revealed once you
+      // tap Reach out, so the brief stays a quick triage rather than a wall of pre-written notes.
+      const itemText = `${c?.name ?? "Contact"}${meta ? ` — ${meta}` : ""}\n${s.reason}${srcLine}`;
       const ok = await sendMessage(
         tg.externalId,
         itemText,
         [
-          { label: "✅ Approve & send", data: `approve:${s.id}` },
-          { label: "✏️ Edit", data: `edit:${s.id}` },
-          { label: "✕ Decline", data: `decline:${s.id}` },
+          { label: "✍️ Reach out", data: `reach:${s.id}` },
+          { label: "😴 Snooze", data: `snooze:${s.id}` },
+          { label: "✕ Dismiss", data: `dismiss:${s.id}` },
+          { label: "🚫 Block", data: `block:${s.id}` },
         ],
         { plain: true },
       );

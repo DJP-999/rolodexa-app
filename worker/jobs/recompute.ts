@@ -143,8 +143,24 @@ export async function runRecompute(): Promise<void> {
     // Domain-fit-first: floor relevance by the LLM fit grade so a prominent, on-thesis
     // contact (e.g. a senior secondaries investor) ranks high even with no interaction
     // history. VIPs (priority-name match OR manual "track closely") keep their own floor.
+    // An EXACT-fit contact (the dealmaker's precise counterparty/capital source) must rank near
+    // the very top on who they are alone, not languish in the 70s. So the top grades floor
+    // relevance high: 0.95+ → 96, 0.90 → 90, 0.85 → 82.
     const fit = c.professionalFit ?? null;
-    const fitFloor = fit == null ? 0 : fit >= 0.85 ? 78 : fit >= 0.7 ? 66 : fit >= 0.55 ? 56 : 0;
+    const fitFloor =
+      fit == null
+        ? 0
+        : fit >= 0.95
+          ? 96
+          : fit >= 0.9
+            ? 90
+            : fit >= 0.85
+              ? 82
+              : fit >= 0.7
+                ? 68
+                : fit >= 0.55
+                  ? 56
+                  : 0;
     const isVip = prof.priority || c.highValue || false;
     const vipFloor = isVip ? 70 : 0;
     const finalRelevance = Math.max(relevance, fitFloor, vipFloor);
