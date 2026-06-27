@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import { connectedAccounts, contacts, interactions } from "@/db/schema";
 import { getChatAttendees, getChatMessages, getChats, unipileConfigured } from "@/lib/integrations/unipile";
@@ -51,6 +51,11 @@ export async function runMessageBackfill(): Promise<void> {
     const chats = await getChats(g.externalId, undefined, env.MESSAGE_BACKFILL_CHAT_CAP);
     if (!chats.length) continue;
 
+    // Contacts that already have a member-id; the rest we backfill from the chat we matched them
+    // to, so future LinkedIn DMs can actually be sent (a slug/name match alone leaves no id).
+    const haveMember = new Set(list.filter((c) => c.linkedinMemberId).map((c) => c.id));
+    const memberBackfill = new Map<string, string>(); // contactId → provider id discovered
+
     // Phase 1: resolve by the chat's attendee provider-id, then by any profile slug on the chat.
     const resolved = new Map<string, string>();
     const unresolved: any[] = [];
@@ -58,8 +63,10 @@ export async function runMessageBackfill(): Promise<void> {
       if (!chat?.id) continue;
       const pid = chat.attendee_provider_id ? String(chat.attendee_provider_id) : null;
       const cid = (pid ? providerToContact.get(pid) : undefined) ?? slugMatch(chat);
-      if (cid) resolved.set(String(chat.id), cid);
-      else unresolved.push(chat);
+      if (cid) {
+        resolved.set(String(chat.id), cid);
+        if (pid && !haveMember.has(cid)) memberBackfill.set(cid, pid);
+      } else unresolved.push(chat);
     }
 
     // Phase 2: look up attendees (parallel) and match by provider-id, profile SLUG, then name.
@@ -81,6 +88,7 @@ export async function runMessageBackfill(): Promise<void> {
           const bySlug = slugMatch(a);
           if (bySlug) {
             resolved.set(String(chat.id), bySlug);
+            if (apid && !haveMember.has(bySlug)) memberBackfill.set(bySlug, apid);
             break;
           }
           const anm =
@@ -88,11 +96,23 @@ export async function runMessageBackfill(): Promise<void> {
           const byName = anm ? nameMap.get(nameKey(anm)) : undefined;
           if (byName) {
             resolved.set(String(chat.id), byName);
+            if (apid && !haveMember.has(byName)) memberBackfill.set(byName, apid);
             break;
           }
         }
       });
     }
+
+    // Persist newly-discovered member-ids so reconnect can send a real LinkedIn DM (not fall back
+    // to email). Only fills the gap — never overwrites an existing id.
+    for (const [cid, pid] of memberBackfill) {
+      await db
+        .update(contacts)
+        .set({ linkedinMemberId: pid })
+        .where(and(eq(contacts.id, cid), isNull(contacts.linkedinMemberId)))
+        .catch(() => undefined);
+    }
+    if (memberBackfill.size) console.log(`[message-backfill] backfilled ${memberBackfill.size} member-id(s)`);
 
     // Phase 3: fetch messages (parallel) for resolved chats and log them.
     const entries = [...resolved.entries()];

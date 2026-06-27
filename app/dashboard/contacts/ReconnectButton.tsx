@@ -5,7 +5,8 @@ import { Sparkles, Loader2, Send, Pencil, X, Check, AlertTriangle } from "lucide
 import { reconnectDraftAction, reconnectSendAction } from "./reconnect";
 
 type Phase = "idle" | "loading" | "review" | "sending" | "sent" | "error";
-type DraftMeta = { why: string; channel: "linkedin" | "email" | null; channelLabel: string };
+type Channel = "linkedin" | "email";
+type DraftMeta = { why: string; channel: Channel | null; channelLabel: string; availableChannels: Channel[] };
 
 /**
  * One-tap reconnection. Pulls the contact's full history (notes, meeting notes, past
@@ -20,7 +21,9 @@ export default function ReconnectButton({ id, name }: { id: string; name: string
     why: "",
     channel: null,
     channelLabel: "",
+    availableChannels: [],
   });
+  const [chosen, setChosen] = useState<Channel | null>(null);
   const [editing, setEditing] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; detail: string; channel: string | null } | null>(null);
   const [pending, start] = useTransition();
@@ -39,7 +42,9 @@ export default function ReconnectButton({ id, name }: { id: string; name: string
         return;
       }
       setDraft(r.draft);
-      setMeta({ why: r.why, channel: r.channel, channelLabel: r.channelLabel });
+      setMeta({ why: r.why, channel: r.channel, channelLabel: r.channelLabel, availableChannels: r.availableChannels });
+      // Default to the auto-resolved channel, else the first available one.
+      setChosen(r.channel ?? r.availableChannels[0] ?? null);
       setPhase("review");
     });
   }
@@ -47,7 +52,7 @@ export default function ReconnectButton({ id, name }: { id: string; name: string
   function send() {
     setPhase("sending");
     start(async () => {
-      const r = await reconnectSendAction(id, draft);
+      const r = await reconnectSendAction(id, draft, chosen ?? undefined);
       setResult({ ok: r.ok, detail: r.detail, channel: r.channel });
       setPhase(r.ok ? "sent" : "error");
     });
@@ -112,8 +117,26 @@ export default function ReconnectButton({ id, name }: { id: string; name: string
         }`}
       />
 
-      <div className="mt-1.5 flex items-center justify-between gap-2">
-        <span className="text-[11px] text-muted">{meta.channelLabel}</span>
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        <span className="text-[11px] text-muted">Send via</span>
+        {meta.availableChannels.length === 0 ? (
+          <span className="text-[11px] text-muted">no channel on file — copy &amp; send manually</span>
+        ) : (
+          meta.availableChannels.map((ch) => (
+            <button
+              key={ch}
+              type="button"
+              onClick={() => setChosen(ch)}
+              className={`rounded-md px-2 py-0.5 text-[11px] font-medium ${
+                chosen === ch
+                  ? "bg-[#2d6cf6] text-white"
+                  : "border border-hairline text-muted hover:bg-black/[0.03]"
+              }`}
+            >
+              {ch === "linkedin" ? "LinkedIn DM" : "Email"}
+            </button>
+          ))
+        )}
       </div>
 
       {phase === "error" && result && (
@@ -127,7 +150,7 @@ export default function ReconnectButton({ id, name }: { id: string; name: string
         <button
           type="button"
           onClick={send}
-          disabled={pending || phase === "sending" || !meta.channel}
+          disabled={pending || phase === "sending" || !chosen}
           className="inline-flex items-center gap-1.5 rounded-lg bg-[#2d6cf6] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#1f5ae0] disabled:opacity-50"
         >
           {phase === "sending" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}

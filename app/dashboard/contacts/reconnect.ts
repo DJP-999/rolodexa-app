@@ -11,12 +11,14 @@ import { resolveChannel, deliverOutreach } from "@/lib/outreach/deliver";
 
 const NOTES_KEY = /note|background|summary|description|comment|bio|about/i;
 
+type Channel = "linkedin" | "email";
 type ReconnectDraft = {
   ok: boolean;
   draft: string;
   why: string;
-  channel: "linkedin" | "email" | null;
+  channel: Channel | null;
   channelLabel: string;
+  availableChannels: Channel[];
   detail?: string;
 };
 
@@ -47,7 +49,7 @@ function channelLabelFor(ch: "linkedin" | "email" | null): string {
  * that the automated proactive engine skips (those have no last-contact timestamp).
  */
 export async function reconnectDraftAction(contactId: string): Promise<ReconnectDraft> {
-  const empty: ReconnectDraft = { ok: false, draft: "", why: "", channel: null, channelLabel: channelLabelFor(null) };
+  const empty: ReconnectDraft = { ok: false, draft: "", why: "", channel: null, channelLabel: channelLabelFor(null), availableChannels: [] };
   const user = await getPrimaryUser();
   if (!user || !contactId) return empty;
 
@@ -157,6 +159,11 @@ export async function reconnectDraftAction(contactId: string): Promise<Reconnect
   });
 
   const channel = await resolveChannel(c);
+  // What the user can actually choose to send on: LinkedIn requires a stored member-id; email
+  // requires an address. The UI uses this to offer a channel toggle.
+  const availableChannels: Channel[] = [];
+  if (c.linkedinMemberId) availableChannels.push("linkedin");
+  if (c.email) availableChannels.push("email");
   let draft = stripEmDashes((res?.message ?? "").trim());
   // Guard against placeholder/meta leaks; fall back to a clean no-agenda hello.
   if (!draft || /\[[^\]]*\]/.test(draft) || draft.startsWith("[llm-stub")) {
@@ -169,7 +176,7 @@ export async function reconnectDraftAction(contactId: string): Promise<Reconnect
       ? "No prior touchpoint on record — a warm first reconnection."
       : `It's been ${lastDays} days since your last contact.`);
 
-  return { ok: true, draft, why, channel, channelLabel: channelLabelFor(channel) };
+  return { ok: true, draft, why, channel, channelLabel: channelLabelFor(channel), availableChannels };
 }
 
 /**
@@ -179,6 +186,7 @@ export async function reconnectDraftAction(contactId: string): Promise<Reconnect
 export async function reconnectSendAction(
   contactId: string,
   message: string,
+  channel?: Channel,
 ): Promise<{ ok: boolean; channel: "linkedin" | "email" | null; detail: string }> {
   const user = await getPrimaryUser();
   if (!user || !contactId) return { ok: false, channel: null, detail: "not signed in" };
@@ -194,5 +202,6 @@ export async function reconnectSendAction(
   )[0];
   if (!c) return { ok: false, channel: null, detail: "contact not found" };
 
-  return deliverOutreach(user.id, c, text);
+  // Honor the user's explicit channel choice (no silent fallback to the other channel).
+  return deliverOutreach(user.id, c, text, channel);
 }

@@ -43,6 +43,7 @@ async function logOutbound(
   userId: string,
   contactId: string,
   channel: "linkedin" | "nylas_email",
+  text: string,
 ): Promise<void> {
   await db
     .insert(interactions)
@@ -54,6 +55,8 @@ async function logOutbound(
       channel,
       occurredAt: new Date(),
       sourceRef: `dexa-approve-${contactId}-${Date.now()}`,
+      // Store the actual text sent (including the user's edits) so the voice learner picks it up.
+      metadata: { text: text.slice(0, 1200) },
     })
     .onConflictDoNothing();
 }
@@ -66,22 +69,31 @@ export async function deliverOutreach(
   userId: string,
   contact: Contact,
   rawText: string,
+  force?: "linkedin" | "email",
 ): Promise<DeliveryResult> {
   const text = stripEmDashes(rawText).trim();
   if (!text) return { ok: false, channel: null, detail: "empty message" };
 
-  let channel = await resolveChannel(contact);
+  let channel = force ?? (await resolveChannel(contact));
 
   if (channel === "linkedin") {
     const liId = await unipileAccount(userId, "linkedin");
     if (liId && contact.linkedinMemberId) {
       const ok = await sendLinkedInMessage(liId, { memberId: contact.linkedinMemberId, text });
       if (ok) {
-        await logOutbound(userId, contact.id, "linkedin");
+        await logOutbound(userId, contact.id, "linkedin", text);
         return { ok: true, channel: "linkedin", detail: "LinkedIn" };
       }
     }
-    channel = contact.email ? "email" : null; // fall back to email
+    // When the user explicitly chose LinkedIn, NEVER silently switch to email — surface why.
+    if (force === "linkedin") {
+      return {
+        ok: false,
+        channel: null,
+        detail: contact.linkedinMemberId ? "LinkedIn send failed" : "No LinkedIn ID on file yet — run Message backfill, then retry.",
+      };
+    }
+    channel = contact.email ? "email" : null; // auto mode only: fall back to email
   }
 
   if (channel === "email") {
@@ -98,7 +110,7 @@ export async function deliverOutreach(
         ...(sender?.email ? { from: { name: sender.name, email: sender.email } } : {}),
       });
       if (ok) {
-        await logOutbound(userId, contact.id, "nylas_email");
+        await logOutbound(userId, contact.id, "nylas_email", text);
         return { ok: true, channel: "email", detail: "email" };
       }
     }
