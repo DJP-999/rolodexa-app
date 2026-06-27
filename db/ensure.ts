@@ -145,6 +145,10 @@ export async function ensureSchema(sql: {
     "summary" text,
     "updated_at" timestamptz NOT NULL DEFAULT now()
   )`);
+  // Incremental fit-grading bookkeeping.
+  await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "fit_graded_at" timestamptz`);
+  await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "fit_graded_company" text`);
+  await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "fit_graded_model" text`);
   // Per-contact Telegram outreach controls (block / dismiss / snooze).
   await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "outreach_blocked" boolean DEFAULT false`);
   await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "outreach_dismissed_at" timestamptz`);

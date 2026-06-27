@@ -31,10 +31,11 @@ const schema = z.object({
 
   OPENROUTER_API_KEY: z.string().optional(),
   OPENROUTER_MODEL_CHEAP: z.string().default("openai/gpt-4o-mini"),
-  // Optional: route the STRONG tier via OpenRouter (e.g. "z-ai/glm-5.2"). Falls back to the
-  // cheap model if unset. Set LLM_STRONG_PROVIDER=openrouter to make it the primary for drafts.
-  OPENROUTER_MODEL_STRONG: z.string().optional(),
-  LLM_STRONG_PROVIDER: z.enum(["anthropic", "openrouter"]).default("anthropic"),
+  // The STRONG (reasoning) tier — used for fit grading and outreach drafts — defaults to
+  // GLM-5.2 via OpenRouter: a genuine reasoning model at ~3-5x lower cost than Sonnet. Anthropic
+  // Sonnet (LLM_MODEL_STRONG) stays as the automatic fallback if OpenRouter is unavailable.
+  OPENROUTER_MODEL_STRONG: z.string().default("z-ai/glm-5.2"),
+  LLM_STRONG_PROVIDER: z.enum(["anthropic", "openrouter"]).default("openrouter"),
 
   AUTH_SECRET: z.string().optional(),
   AUTH_DEV_USER_EMAIL: z.string().default("dev@rolodexa.local"),
@@ -53,6 +54,9 @@ const schema = z.object({
   // Max NEW firms to web-research per fit-grade run (cached firms are free). Bounds Exa+LLM
   // cost; coverage converges across runs as the per-firm cache fills. Investors first.
   FIRM_RESEARCH_CAP: z.coerce.number().default(300),
+  // Incremental grading: a contact is re-graded only when something changed (new/never graded,
+  // model or prompt changed, MOVED FIRMS, freshly enriched) or after this many days as a refresh.
+  FIT_REGRADE_DAYS: z.coerce.number().default(60),
   // Set to a contact's name to print targeted diagnostics in the message-backfill job
   // (does their chat exist in the synced set, and why did/didn't it attribute). Leave unset normally.
   DEBUG_BACKFILL_NAME: z.string().optional(),

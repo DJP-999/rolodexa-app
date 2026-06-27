@@ -60,6 +60,12 @@ export const contacts = pgTable("contacts", {
   pitchbookData: jsonb("pitchbook_data").$type<Record<string, string>>(),
   // How this contact entered the rolodex: manual | meeting | csv | split | linkedin.
   source: text("source"),
+  // Incremental fit-grading bookkeeping: when it was last fit-graded, the firm it was graded
+  // against (so a firm move forces a re-grade), and a model+prompt signature (so switching the
+  // grading model or changing the rubric re-grades everyone exactly once).
+  fitGradedAt: timestamp("fit_graded_at", { withTimezone: true }),
+  fitGradedCompany: text("fit_graded_company"),
+  fitGradedModel: text("fit_graded_model"),
   // Telegram outreach controls. blocked = never surface updates again; dismissedAt = suppress
   // non-news check-ins (news still allowed); snoozedUntil = mute everything until this time.
   outreachBlocked: boolean("outreach_blocked").default(false),

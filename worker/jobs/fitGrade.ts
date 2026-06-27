@@ -75,7 +75,33 @@ async function gradeWithRetry(inputs: FitInput[], focus: UserFocus) {
   return [];
 }
 
-async function persist(updates: { id: string; fit: number; summary: string; rationale: string }[]) {
+// Bump when the grading rubric changes so every contact re-grades exactly once. Combined with
+// the strong-model id, this signature lets us detect both a model switch and a prompt change.
+const GRADE_PROMPT_VERSION = "v3";
+function gradeSignature(): string {
+  const model =
+    env.LLM_STRONG_PROVIDER === "openrouter"
+      ? env.OPENROUTER_MODEL_STRONG || env.OPENROUTER_MODEL_CHEAP
+      : env.LLM_MODEL_STRONG;
+  return `${model}@${GRADE_PROMPT_VERSION}`;
+}
+
+/** Should this contact be (re-)graded now? Only when something that affects the grade changed. */
+function needsGrade(c: Contact, sig: string): boolean {
+  if (c.professionalFit == null) return true; // never graded
+  if ((c.fitGradedModel ?? "") !== sig) return true; // grading model OR rubric changed
+  if ((c.company ?? "") !== (c.fitGradedCompany ?? "")) return true; // MOVED FIRMS
+  const gradedAt = c.fitGradedAt ? new Date(c.fitGradedAt).getTime() : 0;
+  if (!gradedAt) return true;
+  if (c.enrichedAt && new Date(c.enrichedAt).getTime() > gradedAt) return true; // freshly enriched
+  if (Date.now() - gradedAt > env.FIT_REGRADE_DAYS * 86_400_000) return true; // periodic refresh
+  return false;
+}
+
+async function persist(
+  updates: { id: string; fit: number; summary: string; rationale: string; company?: string | null }[],
+) {
+  const sig = gradeSignature();
   for (let i = 0; i < updates.length; i += 50) {
     await Promise.all(
       updates.slice(i, i + 50).map((u) =>
@@ -84,6 +110,9 @@ async function persist(updates: { id: string; fit: number; summary: string; rati
           .set({
             professionalFit: u.fit,
             gradedAt: new Date(),
+            fitGradedAt: new Date(),
+            fitGradedModel: sig,
+            fitGradedCompany: u.company ?? null,
             ...(u.summary ? { summary: u.summary } : {}),
             ...(u.rationale ? { gradeRationale: u.rationale } : {}),
           })
@@ -118,7 +147,15 @@ export async function runFitGrade(): Promise<void> {
   const us = await db.select().from(userContext);
   const ctxByUser = new Map(us.map((u) => [u.userId, u]));
   const all = await db.select().from(contacts);
-  const people = all.filter((c) => !c.isOrganization);
+  // INCREMENTAL: only grade contacts that are new, moved firms, freshly enriched, periodically
+  // stale, or whose grading model/rubric changed — instead of the whole network every run.
+  const sig = gradeSignature();
+  const people = all.filter((c) => !c.isOrganization && needsGrade(c, sig));
+  console.log(`[fit-grade] ${people.length}/${all.length} contact(s) need (re)grading [sig=${sig}]`);
+  if (!people.length) {
+    console.log("[fit-grade] nothing to grade — skipping");
+    return;
+  }
 
   people.sort((a, b) => gradePriority(b) - gradePriority(a));
 
@@ -140,7 +177,10 @@ export async function runFitGrade(): Promise<void> {
       const batches: Contact[][] = [];
       for (let j = 0; j < slice.length; j += BATCH) batches.push(slice.slice(j, j + BATCH));
       const results = await Promise.all(batches.map((b) => gradeWithRetry(b.map((c) => buildFitInput(c, firmMap)), focus)));
-      const updates = results.flat().map((r) => ({ id: r.id, fit: r.fit, summary: r.summary, rationale: r.rationale }));
+      const companyById = new Map(slice.map((c) => [c.id, c.company]));
+      const updates = results
+        .flat()
+        .map((r) => ({ id: r.id, fit: r.fit, summary: r.summary, rationale: r.rationale, company: companyById.get(r.id) ?? null }));
       await persist(updates); // commit each round so progress survives an interruption
       graded += updates.length;
     }
@@ -167,7 +207,7 @@ export async function gradeContactFit(contactId: string): Promise<void> {
   const results = await gradeWithRetry([buildFitInput(c, firmMap)], focusFor(ctx));
   const r = results[0];
   if (r) {
-    await persist([{ id: c.id, fit: r.fit, summary: r.summary, rationale: r.rationale }]);
+    await persist([{ id: c.id, fit: r.fit, summary: r.summary, rationale: r.rationale, company: c.company }]);
   }
   await runRecompute();
 }
