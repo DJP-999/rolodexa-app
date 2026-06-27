@@ -73,6 +73,15 @@ export const pitchbookFirms = pgTable("pitchbook_firms", {
   normalizedFields: jsonb("normalized_fields").$type<Record<string, string>>().default({}),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (t) => ({ pbUserIdx: index("pb_firms_user_idx").on(t.userId), pbKeyIdx: index("pb_firms_key_idx").on(t.userId, t.nameKey) }));
+// Cached web research per FIRM (global, not per-user — firm intel is objective and shared
+// across every contact at that firm). Populated by lib/research/firm.ts from Exa + a summary.
+export const firmResearch = pgTable("firm_research", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  nameKey: text("name_key").notNull().unique(), // normalized firm name
+  name: text("name").notNull(),
+  summary: text("summary"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
 export const claims = pgTable("claims", {
   id: uuid("id").primaryKey().defaultRandom(),
   contactId: uuid("contact_id").references(() => contacts.id, { onDelete: "cascade" }).notNull(),

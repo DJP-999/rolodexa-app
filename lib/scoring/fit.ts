@@ -22,6 +22,9 @@ export type FitInput = {
   notes?: string | null;
   derived?: Record<string, string | undefined>;
   pitchbook?: Record<string, string> | null;
+  // Web-sourced brief on the contact's CURRENT firm (lib/research/firm.ts). Primary, objective
+  // evidence for what the firm actually does and invests in.
+  firmResearch?: string | null;
   profile?: {
     headline?: string | null;
     about?: string | null;
@@ -39,36 +42,52 @@ export type UserFocus = {
 export type FitResult = { id: string; fit: number; summary: string; rationale: string };
 
 function dossier(c: FitInput): string {
+  // Ordered by EVIDENCE PRIORITY: identity → LinkedIn profile → firm research → firm intel →
+  // the user's own CRM notes → supporting facets. The grader is told to weight them in this order.
   const lines: string[] = [`id: ${c.id}`, `Name: ${c.name}`];
-  if (c.role) lines.push(`Role: ${c.role}`);
-  if (c.company) lines.push(`Firm: ${c.company}`);
-  if (c.profile?.headline) lines.push(`Headline: ${c.profile.headline}`);
-  if (c.industry) lines.push(`Industry: ${c.industry}`);
-  if (c.location) lines.push(`Location: ${c.location}`);
-  if (c.relationship) lines.push(`Relationship: ${c.relationship}`);
-  if (c.derived) {
-    const d = Object.entries(c.derived)
-      .filter(([, v]) => v)
-      .map(([k, v]) => `${k}: ${v}`);
-    if (d.length) lines.push(d.join("; "));
-  }
-  if (c.profile?.about) lines.push(`About: ${String(c.profile.about).slice(0, 500)}`);
+  if (c.role) lines.push(`Stored title: ${c.role}`);
+  if (c.company) lines.push(`Current firm: ${c.company}`);
+
+  // (1) LINKEDIN PROFILE — the person's real role, seniority, and trajectory.
+  const prof: string[] = [];
+  if (c.profile?.headline) prof.push(`Headline: ${c.profile.headline}`);
+  if (c.profile?.about) prof.push(`About: ${String(c.profile.about).slice(0, 600)}`);
   if (c.profile?.experience?.length) {
     const ex = c.profile.experience
-      .slice(0, 4)
+      .slice(0, 5)
       .map((e) => `${e.title || e.position || ""} @ ${e.company || ""}`.replace(/ @ $/, "").trim())
       .filter(Boolean);
-    if (ex.length) lines.push(`Experience: ${ex.join("; ")}`);
+    if (ex.length) prof.push(`Experience: ${ex.join("; ")}`);
   }
-  if (c.profile?.skills?.length) lines.push(`Skills: ${c.profile.skills.slice(0, 10).join(", ")}`);
-  if (c.notes) lines.push(`Notes: ${c.notes.slice(0, 400)}`);
+  if (c.profile?.skills?.length) prof.push(`Skills: ${c.profile.skills.slice(0, 10).join(", ")}`);
+  if (prof.length) lines.push(`[LinkedIn profile]\n${prof.join("\n")}`);
+
+  // (2) FIRM RESEARCH — web-sourced brief on what the current firm actually does/invests in.
+  if (c.firmResearch) lines.push(`[Firm research — ${c.company ?? "current firm"}]\n${c.firmResearch.slice(0, 1400)}`);
   if (c.pitchbook && Object.keys(c.pitchbook).length) {
     const pb = Object.entries(c.pitchbook)
       .filter(([, v]) => v)
       .map(([k, v]) => `${k}: ${v}`)
       .join("; ");
-    if (pb) lines.push(`PitchBook firm intel: ${pb}`);
+    if (pb) lines.push(`[PitchBook firm intel] ${pb}`);
   }
+
+  // (3) USER CRM NOTES — authoritative for this contact's specific intent and wants.
+  if (c.notes) lines.push(`[User's CRM notes] ${c.notes.slice(0, 500)}`);
+
+  // (4) Supporting facets.
+  const facets: string[] = [];
+  if (c.industry) facets.push(`Industry: ${c.industry}`);
+  if (c.location) facets.push(`Location: ${c.location}`);
+  if (c.relationship) facets.push(`Relationship: ${c.relationship}`);
+  if (c.derived) {
+    const d = Object.entries(c.derived)
+      .filter(([, v]) => v)
+      .map(([k, v]) => `${k}: ${v}`);
+    if (d.length) facets.push(d.join("; "));
+  }
+  if (facets.length) lines.push(`[Facets] ${facets.join("; ")}`);
+
   return lines.join("\n");
 }
 
@@ -80,6 +99,7 @@ export async function gradeFitBatch(batch: FitInput[], focus: UserFocus): Promis
     `- Role: ${focus.role ?? "placement agent / dealmaker in private markets"}\n` +
     `- Focus: ${focus.currentFocus ?? "brokering secondaries and raising capital from allocators and family offices"}\n` +
     (focus.activeProjects ? `- Active deals / mandates: ${focus.activeProjects}\n` : "") +
+    "EVIDENCE PRIORITY — base each score on the dossier in THIS order of authority: (1) the contact's [LinkedIn profile] — their real role, seniority, and trajectory; (2) the [Firm research] / [PitchBook firm intel] brief — what the current firm ACTUALLY does and the specific stage/asset class it invests in; (3) the [User's CRM notes] — first-hand, authoritative for this contact's specific intent and what they want; (4) [Facets] only as supporting context. When a [LinkedIn profile] or [Firm research] fact contradicts the stored title or a generic label, TRUST the profile/research. When firm research is present, ground the firm's strategy/stage/asset-class in it rather than guessing from the name.\n" +
     "Reason about the contact's FIRM (its strategy — what it does and what it invests in — and its standing) and the person's seniority, then score how DIRECTLY they serve the dealmaker's SPECIFIC stated focus and active mandates above.\n" +
     "Score as a GRADIENT of closeness to the dealmaker's STATED focus above — never a binary on/off. Derive the hierarchy FROM their focus and active mandates, whatever those are:\n" +
     "- TOP (0.85-1.0): the most DIRECT counterparties or capital sources for their exact stated focus — firms/people whose core strategy or mandate IS precisely what the dealmaker brokers, raises for, or sells.\n" +
@@ -94,10 +114,10 @@ export async function gradeFitBatch(batch: FitInput[], focus: UserFocus): Promis
     "Use what you KNOW about each firm — its strategy, stage focus and notable HOLDINGS (an investor in names like Anthropic, OpenAI, Databricks, SpaceX signals late-stage/pre-IPO positioning) — plus the PitchBook intel and portfolio in the dossier, to place each contact and justify it. When data is thin, infer conservatively from the firm and role rather than defaulting to the middle.\n" +
     'Return ONLY JSON {"items":[{"id":"<id>","fit":0.0,"summary":"one line: what they do / invest in","rationale":"where on the gradient and why — name the firm\'s strategy/stage focus and any notable holdings that justify its placement relative to the dealmaker\'s stated focus"}]}.';
   const raw = await complete({
-    tier: "cheap",
+    tier: "strong",
     system,
     messages: [{ role: "user", content: batch.map((b) => `---\n${dossier(b)}`).join("\n") }],
-    maxTokens: 1800,
+    maxTokens: 2400,
     temperature: 0,
   });
   const out: FitResult[] = [];

@@ -136,5 +136,14 @@ export async function ensureSchema(sql: {
     WHERE i."contact_id" IS NULL AND i."counterparty_name" IS NOT NULL
       AND c."user_id" = i."user_id" AND lower(c."name") = lower(trim(i."counterparty_name"))
       AND position(' ' in trim(i."counterparty_name")) > 0`);
+  // Cached per-firm web research (global), fed into fit grading so niche on-thesis firms
+  // (e.g. small VC / family offices) are graded on real intel, not the model's thin priors.
+  await sql.unsafe(`CREATE TABLE IF NOT EXISTS "firm_research" (
+    "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    "name_key" text NOT NULL UNIQUE,
+    "name" text NOT NULL,
+    "summary" text,
+    "updated_at" timestamptz NOT NULL DEFAULT now()
+  )`);
   console.log("[db] ensureSchema applied.");
 }

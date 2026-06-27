@@ -1,6 +1,8 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { contacts, userContext } from "@/db/schema";
+import { env } from "@/lib/env";
+import { researchFirm, researchFirms, firmKey } from "@/lib/research/firm";
 import { gradeFitBatch, type FitInput, type UserFocus } from "@/lib/scoring/fit";
 import { runRecompute } from "./recompute";
 
@@ -11,8 +13,8 @@ const NOTES_KEY = /note|background|summary|description|comment/i;
 
 type Contact = typeof contacts.$inferSelect;
 
-/** Build the LLM fit input from a contact row — includes meeting-note intel. */
-function buildFitInput(c: Contact): FitInput {
+/** Build the LLM fit input from a contact row — includes meeting-note intel and firm research. */
+function buildFitInput(c: Contact, firmMap?: Map<string, string>): FitInput {
   const cf = (c.customFields ?? {}) as Record<string, string>;
   const nf = (c.normalizedFields ?? {}) as Record<string, string>;
   const notesKey = Object.keys(cf).find((k) => NOTES_KEY.test(k));
@@ -44,8 +46,14 @@ function buildFitInput(c: Contact): FitInput {
       "Deal Structure": cf["Deal Structure"],
     },
     pitchbook: (c.pitchbookData ?? null) as Record<string, string> | null,
+    firmResearch: c.company && firmMap ? firmMap.get(firmKey(c.company)) ?? null : null,
     profile: pd ? { headline: pd.headline, about: pd.about, experience: pd.experience, skills: pd.skills } : null,
   };
+}
+
+/** Investor/high-value contacts first, so the firm-research budget is spent where it matters. */
+function firmPriority(c: Contact): number {
+  return (c.relationship === "investor" ? 2 : 0) + (c.highValue ? 1 : 0);
 }
 
 function focusFor(ctx: typeof userContext.$inferSelect | undefined): UserFocus {
@@ -105,12 +113,18 @@ export async function runFitGrade(): Promise<void> {
   let graded = 0;
   for (const [userId, list] of byUser) {
     const focus = focusFor(ctxByUser.get(userId));
+    // Research this user's firms cache-first (capped), investors/high-value first so the budget
+    // lands on the contacts that matter most. Cache persists, so coverage converges across runs.
+    const firmOrder = [...list].sort((a, b) => firmPriority(b) - firmPriority(a));
+    const companies = firmOrder.map((c) => c.company).filter((x): x is string => !!x);
+    const firmMap = await researchFirms(companies, env.FIRM_RESEARCH_CAP);
+    console.log(`[fit-grade] ${firmMap.size} firm brief(s) available (user ${userId})`);
     const roundSize = BATCH * CONCURRENCY;
     for (let i = 0; i < list.length; i += roundSize) {
       const slice = list.slice(i, i + roundSize);
       const batches: Contact[][] = [];
       for (let j = 0; j < slice.length; j += BATCH) batches.push(slice.slice(j, j + BATCH));
-      const results = await Promise.all(batches.map((b) => gradeWithRetry(b.map(buildFitInput), focus)));
+      const results = await Promise.all(batches.map((b) => gradeWithRetry(b.map((c) => buildFitInput(c, firmMap)), focus)));
       const updates = results.flat().map((r) => ({ id: r.id, fit: r.fit, summary: r.summary, rationale: r.rationale }));
       await persist(updates); // commit each round so progress survives an interruption
       graded += updates.length;
@@ -130,7 +144,12 @@ export async function gradeContactFit(contactId: string): Promise<void> {
   const c = (await db.select().from(contacts).where(eq(contacts.id, contactId)).limit(1))[0];
   if (!c || c.isOrganization) return;
   const ctx = (await db.select().from(userContext).where(eq(userContext.userId, c.userId)).limit(1))[0];
-  const results = await gradeWithRetry([buildFitInput(c)], focusFor(ctx));
+  const firmMap = new Map<string, string>();
+  if (c.company) {
+    const s = await researchFirm(c.company);
+    if (s) firmMap.set(firmKey(c.company), s);
+  }
+  const results = await gradeWithRetry([buildFitInput(c, firmMap)], focusFor(ctx));
   const r = results[0];
   if (r) {
     await persist([{ id: c.id, fit: r.fit, summary: r.summary, rationale: r.rationale }]);
