@@ -1,4 +1,4 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { calendarEvents, coldProspects, connectedAccounts, contacts, interactions, users } from "@/db/schema";
 import { getBlacklist, isNoiseEmail } from "@/lib/sync/noise";
@@ -303,6 +303,33 @@ export async function upsertColdProspect(t: TouchInput): Promise<string | null> 
   } catch (e) {
     console.error("[track] upsertColdProspect", e);
     return null;
+  }
+}
+
+/**
+ * Delete cold prospects whose email is one of the user's OWN addresses (login email or any
+ * connected mailbox), plus any interactions still linked to them. These are junk created by an
+ * earlier bug that misclassified an outbound email as inbound and recorded self as the
+ * counterparty. Idempotent — does nothing once the junk is gone.
+ */
+export async function cleanupSelfProspects(userId: string, self: Set<string>): Promise<number> {
+  if (!self.size) return 0;
+  try {
+    const rows = await db
+      .select({ id: coldProspects.id, email: coldProspects.email })
+      .from(coldProspects)
+      .where(eq(coldProspects.userId, userId));
+    const ids = rows.filter((p) => p.email && self.has(normEmail(p.email))).map((p) => p.id);
+    if (!ids.length) return 0;
+    for (let i = 0; i < ids.length; i += 100) {
+      const slice = ids.slice(i, i + 100);
+      await db.delete(interactions).where(inArray(interactions.coldProspectId, slice));
+      await db.delete(coldProspects).where(inArray(coldProspects.id, slice));
+    }
+    return ids.length;
+  } catch (e) {
+    console.error("[track] cleanupSelfProspects", e);
+    return 0;
   }
 }
 

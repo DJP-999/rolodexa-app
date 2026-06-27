@@ -1,10 +1,10 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { connectedAccounts, contacts, interactions } from "@/db/schema";
+import { connectedAccounts } from "@/db/schema";
 import { env, isConfigured } from "@/lib/env";
 import { listRecentMessages } from "@/lib/integrations/nylas";
 import { getEmails, getFolders, listAccounts, unipileConfigured } from "@/lib/integrations/unipile";
-import { logTouch, normEmail, selfEmails } from "@/lib/sync/track";
+import { cleanupSelfProspects, logTouch, normEmail, selfEmails } from "@/lib/sync/track";
 import { cleanupNoiseProspects } from "@/lib/sync/noise";
 
 // Wide window so a re-run backfills recently-sent mail (the unique index dedupes overlap).
@@ -101,57 +101,12 @@ export async function runEmailPoll(): Promise<void> {
       }
       const emails = [...byId.values()];
 
-      // Surgical diagnostic: set DEBUG_EMAIL_ADDR to a counterparty address to confirm whether
-      // their mail is even in the fetched set, and — critically — in which field (to vs cc) and
-      // with what date. Reveals e.g. a contact who was CC'd (we only attribute on `to`).
-      if (env.DEBUG_EMAIL_ADDR) {
-        const needle = env.DEBUG_EMAIL_ADDR.toLowerCase();
-        const hits = emails.filter((e) => JSON.stringify(e ?? {}).toLowerCase().includes(needle));
-        console.log(`[emailPoll-find] addr=${needle} matches=${hits.length}/${emails.length}`);
-        // Ground truth from the DB: does a contact match this address exactly, what email is
-        // actually stored on any "larson" contact, and how is the existing interaction attributed?
-        try {
-          const byEmail = await db
-            .select({ id: contacts.id, email: contacts.email, name: contacts.name })
-            .from(contacts)
-            .where(and(eq(contacts.userId, g.userId), sql`lower(${contacts.email}) = ${needle}`));
-          const likeName = needle.split("@")[0].replace(/[^a-z]/g, "").slice(0, 4) || "zzzz";
-          const byName = await db
-            .select({ id: contacts.id, email: contacts.email, name: contacts.name })
-            .from(contacts)
-            .where(and(eq(contacts.userId, g.userId), sql`lower(${contacts.name}) like ${"%" + likeName + "%"}`));
-          const ix = await db
-            .select({ id: interactions.id, contactId: interactions.contactId, cold: interactions.coldProspectId, cpe: interactions.counterpartyEmail, ref: interactions.sourceRef, at: interactions.occurredAt })
-            .from(interactions)
-            .where(and(eq(interactions.userId, g.userId), sql`lower(${interactions.counterpartyEmail}) = ${needle}`));
-          console.log(`[emailPoll-find] contactByEmail=${JSON.stringify(byEmail)}`);
-          console.log(`[emailPoll-find] nameMatches(${likeName})=${JSON.stringify(byName.map((r) => ({ ...r, email: JSON.stringify(r.email) })))}`);
-          console.log(`[emailPoll-find] existingInteractions=${JSON.stringify(ix)}`);
-          // Also look up by the matched message's sourceRef (its id) — a stale row keyed on this
-          // ref but attributed to a different counterparty is what onConflictDoNothing used to freeze.
-          const refIds = hits.map((e) => String(e?.id ?? e?.message_id ?? e?.provider_id ?? "")).filter(Boolean);
-          if (refIds.length) {
-            const byRef = await db
-              .select({ id: interactions.id, contactId: interactions.contactId, cold: interactions.coldProspectId, dir: interactions.direction, cpe: interactions.counterpartyEmail, ref: interactions.sourceRef, at: interactions.occurredAt })
-              .from(interactions)
-              .where(and(eq(interactions.userId, g.userId), inArray(interactions.sourceRef, refIds)));
-            console.log(`[emailPoll-find] bySourceRef=${JSON.stringify(byRef)}`);
-          }
-        } catch (err) {
-          console.log(`[emailPoll-find] db probe error: ${String(err)}`);
-        }
-        for (const e of hits.slice(0, 6)) {
-          console.log(
-            `[emailPoll-find] id=${e?.id ?? e?.message_id ?? e?.provider_id} date=${
-              e?.date ?? e?.timestamp ?? e?.received_date ?? e?.sent_date
-            } sent=${!!e?.__sent} subject=${String(e?.subject ?? "").slice(0, 60)} from=${JSON.stringify(
-              e?.from_attendee ?? e?.from,
-            )?.slice(0, 100)} to=${JSON.stringify(e?.to_attendees ?? e?.to)?.slice(0, 200)} cc=${JSON.stringify(
-              e?.cc_attendees ?? e?.cc,
-            )?.slice(0, 200)} role=${JSON.stringify(e?.role ?? e?.folders ?? e?.folderIds)?.slice(0, 80)}`,
-          );
-        }
-      }
+      // Purge any cold prospects that were created from one of the user's OWN addresses by an
+      // earlier bug (an outbound email misread as inbound, with self as the counterparty). The
+      // upsert above re-points the real interactions to their contact; this drops the junk prospect.
+      const removedSelf = await cleanupSelfProspects(g.userId, self);
+      if (removedSelf) console.log(`[emailPoll] removed ${removedSelf} self-addressed cold prospect(s)`);
+
       for (const e of emails) {
         const id = e?.id ?? e?.message_id ?? e?.provider_id ?? null;
         const dateRaw = e?.date ?? e?.timestamp ?? e?.received_date ?? e?.sent_date;
