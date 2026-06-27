@@ -92,16 +92,6 @@ export async function runEmailPoll(): Promise<void> {
           sentId ? "found" : "NONE"
         } received=${received.length} sent=${sentMail.length}`,
       );
-      if (sentMail[0]) {
-        const s0 = sentMail[0];
-        console.log(
-          `[emailPoll-debug] sent[0] keys=${Object.keys(s0).join("|")} id=${s0.id ?? s0.message_id ?? s0.provider_id} date=${
-            s0.date ?? s0.timestamp ?? s0.sent_date ?? s0.received_date
-          } from=${JSON.stringify(s0.from_attendee ?? s0.from)?.slice(0, 120)} to=${JSON.stringify(
-            s0.to_attendees ?? s0.to,
-          )?.slice(0, 160)}`,
-        );
-      }
       for (const e of sentMail) if (e) e.__sent = true; // tag so the loop knows it's outbound
       const byId = new Map<string, any>();
       for (const e of [...received, ...sentMail]) {
@@ -110,6 +100,26 @@ export async function runEmailPoll(): Promise<void> {
         byId.set(String(k), e);
       }
       const emails = [...byId.values()];
+
+      // Surgical diagnostic: set DEBUG_EMAIL_ADDR to a counterparty address to confirm whether
+      // their mail is even in the fetched set, and — critically — in which field (to vs cc) and
+      // with what date. Reveals e.g. a contact who was CC'd (we only attribute on `to`).
+      if (env.DEBUG_EMAIL_ADDR) {
+        const needle = env.DEBUG_EMAIL_ADDR.toLowerCase();
+        const hits = emails.filter((e) => JSON.stringify(e ?? {}).toLowerCase().includes(needle));
+        console.log(`[emailPoll-find] addr=${needle} matches=${hits.length}/${emails.length}`);
+        for (const e of hits.slice(0, 6)) {
+          console.log(
+            `[emailPoll-find] id=${e?.id ?? e?.message_id ?? e?.provider_id} date=${
+              e?.date ?? e?.timestamp ?? e?.received_date ?? e?.sent_date
+            } sent=${!!e?.__sent} subject=${String(e?.subject ?? "").slice(0, 60)} from=${JSON.stringify(
+              e?.from_attendee ?? e?.from,
+            )?.slice(0, 100)} to=${JSON.stringify(e?.to_attendees ?? e?.to)?.slice(0, 200)} cc=${JSON.stringify(
+              e?.cc_attendees ?? e?.cc,
+            )?.slice(0, 200)} role=${JSON.stringify(e?.role ?? e?.folders ?? e?.folderIds)?.slice(0, 80)}`,
+          );
+        }
+      }
       for (const e of emails) {
         const id = e?.id ?? e?.message_id ?? e?.provider_id ?? null;
         const dateRaw = e?.date ?? e?.timestamp ?? e?.received_date ?? e?.sent_date;
@@ -118,32 +128,48 @@ export async function runEmailPoll(): Promise<void> {
 
         const from = attEmail(e?.from_attendee ?? e?.from?.[0] ?? e?.from);
         const rawTo: any[] = Array.isArray(e?.to_attendees) ? e.to_attendees : Array.isArray(e?.to) ? e.to : [];
-        const tos = rawTo
+        const rawCc: any[] = Array.isArray(e?.cc_attendees) ? e.cc_attendees : Array.isArray(e?.cc) ? e.cc : [];
+        const recips = [...rawTo, ...rawCc]
           .map(attEmail)
           .filter((x): x is { email: string; name: string | null } => !!x);
 
         // Sent-folder mail is ALWAYS outbound; its `from` may be omitted (implied = you), so we
-        // don't require it — the counterparty is the recipient.
+        // don't require it — the counterparties are the recipients.
         const isSent = !!e.__sent;
         const outbound = isSent || (from ? self.has(from.email) : false);
         if (!outbound && !from) continue;
-        const other = outbound ? tos.find((t) => !self.has(t.email)) ?? tos[0] ?? null : from;
-        if (!other) continue;
 
-        await logTouch({
-          userId: g.userId,
-          channel: "nylas_email",
-          direction: outbound ? "outbound" : "inbound",
-          eventType: outbound ? "email_out" : "email_in",
-          occurredAt: when,
-          sourceRef: String(id),
-          threadId: e?.thread_id ?? e?.threadId ?? null,
-          counterpartyEmail: other.email,
-          counterpartyName: other.name,
-          subject: typeof e?.subject === "string" ? e.subject : null,
-          text: emailBody(e),
-        });
-        inserted++;
+        // Attribute a touch to EVERY non-self party — for outbound mail that's every To+CC
+        // recipient (emailing or CC'ing someone IS contacting them), de-duplicated by address.
+        // Previously we logged only the first recipient, so a contact who was the 2nd recipient
+        // or merely CC'd (e.g. nick@s20.co) was silently dropped and never marked "contacted".
+        const seen = new Set<string>();
+        const counterparties = outbound
+          ? recips.filter((r) => !self.has(r.email) && !seen.has(r.email) && seen.add(r.email))
+          : from
+            ? [from]
+            : [];
+        if (!counterparties.length) continue;
+
+        for (const other of counterparties) {
+          await logTouch({
+            userId: g.userId,
+            channel: "nylas_email",
+            direction: outbound ? "outbound" : "inbound",
+            eventType: outbound ? "email_out" : "email_in",
+            occurredAt: when,
+            // Per-recipient sourceRef: the insert is idempotent on sourceRef, so a single
+            // multi-recipient email must yield a distinct ref per counterparty or all but the
+            // first collide and vanish.
+            sourceRef: counterparties.length > 1 ? `${id}:${other.email}` : String(id),
+            threadId: e?.thread_id ?? e?.threadId ?? null,
+            counterpartyEmail: other.email,
+            counterpartyName: other.name,
+            subject: typeof e?.subject === "string" ? e.subject : null,
+            text: emailBody(e),
+          });
+          inserted++;
+        }
       }
     }
   }
