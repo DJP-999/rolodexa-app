@@ -124,5 +124,17 @@ export async function ensureSchema(sql: {
   // Purge inferred "Meeting detected from conversation" events (source='llm') that polluted the
   // calendar. Detection is now disabled; this cleanup is idempotent (nothing new is created).
   await sql.unsafe(`DELETE FROM "calendar_events" WHERE "source" = 'llm'`);
+  // Reconcile interactions logged as cold prospects that actually belong to a contact — match by
+  // email first, then by exact full name. Fixes e.g. an email sent to an address not on the
+  // contact's record. Idempotent: only touches rows with no contact yet.
+  await sql.unsafe(`UPDATE "interactions" i SET "contact_id" = c."id", "cold_prospect_id" = NULL
+    FROM "contacts" c
+    WHERE i."contact_id" IS NULL AND i."counterparty_email" IS NOT NULL
+      AND c."user_id" = i."user_id" AND lower(c."email") = lower(i."counterparty_email")`);
+  await sql.unsafe(`UPDATE "interactions" i SET "contact_id" = c."id", "cold_prospect_id" = NULL
+    FROM "contacts" c
+    WHERE i."contact_id" IS NULL AND i."counterparty_name" IS NOT NULL
+      AND c."user_id" = i."user_id" AND lower(c."name") = lower(trim(i."counterparty_name"))
+      AND position(' ' in trim(i."counterparty_name")) > 0`);
   console.log("[db] ensureSchema applied.");
 }

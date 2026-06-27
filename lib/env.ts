@@ -57,6 +57,9 @@ const schema = z.object({
   // relationships (most of the rolodex) need a high ceiling to be reached.
   MESSAGE_BACKFILL_CHAT_CAP: z.coerce.number().default(8000),
   MESSAGE_BACKFILL_ATTENDEE_LOOKUPS: z.coerce.number().default(800),
+  // How many recent emails the 30-min poll paginates through (across all folders incl. Sent),
+  // so a busy mailbox doesn't truncate recent mail to a single 250-item page.
+  EMAIL_POLL_CAP: z.coerce.number().default(1500),
   ENRICH_DAILY_LINKEDIN_CAP: z.coerce.number().default(120),
   ENRICH_MONTHLY_BUDGET_USD: z.coerce.number().default(40),
 

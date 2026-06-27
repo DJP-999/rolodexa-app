@@ -220,17 +220,32 @@ export async function sendEmail(
   }
 }
 
-/** Recent emails for a connected mail account (Gmail/Outlook), newest first. */
-export async function getEmails(accountId: string, limit = 200): Promise<any[]> {
+/**
+ * Recent emails for a connected mail account (Gmail/Outlook), newest first — across ALL
+ * folders incl. Sent. Paginates (250/page) up to `cap`, optionally only those after an ISO
+ * datetime, so a busy mailbox doesn't truncate recent mail to a single page.
+ */
+export async function getEmails(accountId: string, cap = 200, after?: string): Promise<any[]> {
   const client = await getClient();
   if (!client) return [];
+  const out: any[] = [];
+  let cursor: string | undefined;
   try {
-    const res: any = await client.email.getAll({ account_id: accountId, limit });
-    return res?.items ?? res?.data ?? [];
+    do {
+      const res: any = await client.email.getAll({
+        account_id: accountId,
+        limit: 250,
+        ...(cursor ? { cursor } : {}),
+        ...(after ? { after } : {}),
+      });
+      const items: any[] = res?.items ?? res?.data ?? [];
+      out.push(...items);
+      cursor = res?.cursor ?? res?.paging?.cursor ?? res?.next_cursor ?? undefined;
+    } while (cursor && out.length < cap);
   } catch (e) {
     console.error("[unipile] getEmails", e);
-    return [];
   }
+  return out;
 }
 
 /**

@@ -81,6 +81,28 @@ export async function findContact(
   return null;
 }
 
+/**
+ * Last-resort match by FULL name — handles a touch whose address/handle isn't on the
+ * contact's record yet (e.g. you emailed a contact at a new address). Requires 2+ name
+ * tokens so common single names don't cause false matches.
+ */
+export async function findContactByName(userId: string, name?: string | null): Promise<string | null> {
+  const n = (name ?? "").trim();
+  if (!n || n.split(/\s+/).length < 2) return null;
+  try {
+    const c = (
+      await db
+        .select({ id: contacts.id })
+        .from(contacts)
+        .where(and(eq(contacts.userId, userId), sql`lower(${contacts.name}) = ${n.toLowerCase()}`))
+        .limit(1)
+    )[0];
+    return c?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
 type Channel = "nylas_email" | "linkedin" | "telegram" | "imessage" | "agent_audit" | "nylas_calendar";
 
 export type TouchInput = {
@@ -156,6 +178,17 @@ export async function logTouch(t: TouchInput): Promise<{ contactId: string | nul
   let contactId = t.contactId ?? null;
   if (!contactId) {
     contactId = await findContact(t.userId, { email: t.counterpartyEmail, memberId: t.counterpartyMemberId });
+  }
+  // Fallback: attribute by the counterparty's full name when the address/handle isn't on the
+  // contact yet — then backfill the email so future touches match directly by address.
+  if (!contactId) {
+    contactId = await findContactByName(t.userId, t.counterpartyName);
+    if (contactId && t.channel === "nylas_email" && cpe) {
+      await db
+        .update(contacts)
+        .set({ email: cpe })
+        .where(and(eq(contacts.id, contactId), eq(contacts.userId, t.userId), sql`${contacts.email} IS NULL`));
+    }
   }
 
   // No contact match → this is cold outreach / unknown counterparty. Track the prospect.

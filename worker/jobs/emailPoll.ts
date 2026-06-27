@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { connectedAccounts } from "@/db/schema";
-import { isConfigured } from "@/lib/env";
+import { env, isConfigured } from "@/lib/env";
 import { listRecentMessages } from "@/lib/integrations/nylas";
 import { getEmails, listAccounts, unipileConfigured } from "@/lib/integrations/unipile";
 import { logTouch, normEmail, selfEmails } from "@/lib/sync/track";
@@ -74,7 +74,8 @@ export async function runEmailPoll(): Promise<void> {
       const self = await selfEmails(g.userId);
       const own = acctEmailById.get(g.externalId);
       if (own) self.add(own);
-      const emails = await getEmails(g.externalId, 200);
+      // Paginate by date so high-volume mailboxes don't truncate recent (incl. sent) mail.
+      const emails = await getEmails(g.externalId, env.EMAIL_POLL_CAP, new Date(cutoff).toISOString());
       for (const e of emails) {
         const id = e?.id ?? e?.message_id;
         const dateRaw = e?.date ?? e?.timestamp ?? e?.received_date;
