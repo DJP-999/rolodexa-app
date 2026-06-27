@@ -46,36 +46,76 @@ export function pickPrimaryRole(profileData: unknown, focus: Focus): { company: 
   return { company: best.company ?? null, position: best.position ?? null };
 }
 
-/** Compute the reconcile patch for one contact, or null if nothing changed. */
+/**
+ * Compute the reconcile patch for one contact, or null if nothing changed.
+ *
+ * "Out of date" (the red flag + a job-change audit) fires ONLY on a genuine DEPARTURE — when the
+ * CRM's company is no longer one of the person's CURRENT LinkedIn roles. It must NOT fire for:
+ *   • concurrent roles — e.g. still President of Love Travel AND now a Venture Partner at PLP, or
+ *   • a title that's merely worded differently — e.g. a CRM headline vs LinkedIn's concise title
+ *     at the SAME company.
+ * Role PRIORITIZATION (showing the most thesis-relevant current role) still happens, but quietly:
+ * when there are multiple current COMPANIES we switch to the most relevant one with no flag. The
+ * function is also self-healing: it strips false flags/audit entries left by the older logic.
+ */
 export function reconcileProfile(c: Contact, focus: Focus): Partial<Contact> | null {
   if (!c.profileData) return null;
-  const primary = pickPrimaryRole(c.profileData, focus);
-  if (!primary || (!primary.company && !primary.position)) return null;
+  const pd = c.profileData as { experience?: Exp[] };
+  const currentRoles = (Array.isArray(pd?.experience) ? pd.experience : []).filter(
+    (e) => e?.current && (e.company || e.position),
+  );
+  if (!currentRoles.length) return null;
+  const currentCompanies = new Set(currentRoles.map((e) => norm(e.company ?? "")).filter(Boolean));
 
-  const updates = [...(c.fieldUpdates ?? [])];
+  const primary = pickPrimaryRole(c.profileData, focus);
+  if (!primary || !primary.company) return null; // need a current company to reason about moves
+
   const patch: Record<string, unknown> = {};
   const now = new Date();
-  let companyChanged = false;
 
-  if (primary.company && norm(primary.company) !== norm(c.company)) {
-    updates.push({ field: "company", old: c.company ?? null, new: primary.company, at: now.toISOString(), source: "linkedin" });
+  // Self-heal: keep ONLY genuine departures in the audit (a company whose old value is no longer
+  // current). This drops title-only entries and concurrent-role "changes" the old logic recorded.
+  const existing = c.fieldUpdates ?? [];
+  const cleaned = existing.filter((u) => u.field === "company" && u.old && !currentCompanies.has(norm(u.old)));
+  if (cleaned.length !== existing.length) patch.fieldUpdates = cleaned;
+
+  const crmCompanyCurrent = !norm(c.company) || currentCompanies.has(norm(c.company));
+  const genuineDeparture = !!norm(c.company) && !crmCompanyCurrent;
+
+  if (genuineDeparture) {
+    // A real job move: adopt the most-relevant current role, record it, flag the notes to review.
+    const updates = [
+      ...cleaned,
+      { field: "company", old: c.company ?? null, new: primary.company, at: now.toISOString(), source: "linkedin" },
+    ];
     patch.company = primary.company;
-    companyChanged = true;
+    if (primary.position && norm(primary.position) !== norm(c.role)) {
+      updates.push({ field: "role", old: c.role ?? null, new: primary.position, at: now.toISOString(), source: "linkedin" });
+      patch.role = primary.position;
+    }
+    patch.fieldUpdates = updates.slice(-20);
+    patch.infoStale = true;
+    patch.infoStaleAt = now;
+    patch.infoStaleReason = `LinkedIn shows they're now at ${primary.company}${primary.position ? ` as ${primary.position}` : ""} and no longer lists ${c.company}. Your notes may describe their prior role; review and update.`;
+    return patch as Partial<Contact>;
   }
-  if (primary.position && norm(primary.position) !== norm(c.role)) {
-    updates.push({ field: "role", old: c.role ?? null, new: primary.position, at: now.toISOString(), source: "linkedin" });
-    patch.role = primary.position;
-  }
-  if (!("company" in patch) && !("role" in patch)) return null;
 
-  patch.fieldUpdates = updates.slice(-20); // keep recent history bounded
-  // The structured fields are auto-fixed, but the user's freeform notes can't be — flag them.
-  patch.infoStale = true;
-  patch.infoStaleAt = now;
-  patch.infoStaleReason = companyChanged
-    ? `LinkedIn now shows ${primary.company}${primary.position ? ` — ${primary.position}` : ""}. Your saved notes may still describe their prior role; review and update.`
-    : `LinkedIn now shows the title "${primary.position}". Your notes may be out of date.`;
-  return patch as Partial<Contact>;
+  // Not a departure. Prioritize the most-relevant current role for display/grading, but quietly —
+  // and only when it's a DIFFERENT current company (concurrent roles). A same-company title
+  // difference is left untouched so we don't overwrite a richer CRM title or false-flag it.
+  if (norm(primary.company) !== norm(c.company) && currentCompanies.has(norm(primary.company))) {
+    patch.company = primary.company;
+    if (primary.position) patch.role = primary.position;
+  }
+
+  // Clear a stale flag left by the old over-eager logic when there's no genuine departure on file.
+  const hasGenuineDeparture = cleaned.length > 0;
+  if (c.infoStale && !hasGenuineDeparture) {
+    patch.infoStale = false;
+    patch.infoStaleReason = null;
+  }
+
+  return Object.keys(patch).length ? (patch as Partial<Contact>) : null;
 }
 
 /**
@@ -96,9 +136,13 @@ export async function reconcileAllProfiles(): Promise<number> {
     try {
       await db.update(contacts).set(patch).where(eq(contacts.id, c.id));
       updated++;
-      const fu = (patch.fieldUpdates ?? []) as Array<{ field: string; old: string | null; new: string }>;
-      const last = fu[fu.length - 1];
-      console.log(`[reconcile] ${c.name}: ${last?.field} "${last?.old ?? "—"}" → "${last?.new}"`);
+      if (patch.infoStale === true) {
+        console.log(`[reconcile] ${c.name}: job move → ${patch.company ?? c.company} (flagged)`);
+      } else if (patch.company || patch.role) {
+        console.log(`[reconcile] ${c.name}: prioritized role → ${patch.company ?? c.company}${patch.role ? ` / ${patch.role}` : ""}`);
+      } else {
+        console.log(`[reconcile] ${c.name}: cleared false stale flag`);
+      }
     } catch (e) {
       console.error(`[reconcile] failed for ${c.id}:`, String(e));
     }
