@@ -94,7 +94,7 @@ export async function reconcileAllProfiles(): Promise<number> {
     const patch = reconcileProfile(c, focusByUser.get(c.userId) ?? {});
     if (!patch) continue;
     try {
-      await db.update(contacts).set({ ...patch, updatedAt: new Date() }).where(eq(contacts.id, c.id));
+      await db.update(contacts).set(patch).where(eq(contacts.id, c.id));
       updated++;
       const fu = (patch.fieldUpdates ?? []) as Array<{ field: string; old: string | null; new: string }>;
       const last = fu[fu.length - 1];
@@ -111,6 +111,6 @@ export async function reconcileAllProfiles(): Promise<number> {
 export async function markInfoReviewed(userId: string, contactId: string): Promise<void> {
   await db
     .update(contacts)
-    .set({ infoStale: false, infoStaleReason: null, updatedAt: new Date() })
+    .set({ infoStale: false, infoStaleReason: null })
     .where(and(eq(contacts.id, contactId), eq(contacts.userId, userId)));
 }
