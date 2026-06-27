@@ -36,9 +36,9 @@ async function draft(opts: {
   const msg = await complete({
     tier: "strong",
     system:
-      "You write outreach AS THE USER (first person), to someone they ALREADY KNOW. " +
+      "You write outreach AS THE USER (first person), to someone they ALREADY KNOW and have met before — never a stranger or a cold lead. " +
       TONE_GUIDE +
-      " Use the recipient's real first name. Reference the concrete detail if given; if not, a genuine friendly hello with no invented specifics. Never invent facts. Output ONLY the message text." +
+      " Use the recipient's real first name. If a concrete detail is given, reference it casually the way an old friend would (never as a compliment on their work or a reason for reaching out); if not, a genuine no-agenda 'it's been too long, let's catch up' hello with no invented specifics. Never invent facts. Output ONLY the message text." +
       (opts.style
         ? `\n\nKeep the short text-message format above, but write in the user's own voice, their word choice, warmth, and characteristic phrasing (ignore any email greetings or sign-offs from this profile):\n${opts.style}`
         : ""),
@@ -48,7 +48,7 @@ async function draft(opts: {
         content:
           `Recipient: ${opts.name}\nReason: ${opts.trigger}` +
           (opts.fact ? `\nConcrete detail: ${opts.fact}` : "") +
-          (opts.focus ? `\nMy current focus: ${opts.focus}` : ""),
+          (opts.focus ? `\nMy current focus (context only, do NOT bring it up or use it as the reason to reach out): ${opts.focus}` : ""),
       },
     ],
     maxTokens: 160,

@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Mail, MapPin, ExternalLink, Briefcase, Newspaper, Activity, Users } from "lucide-react";
+import { ArrowLeft, Mail, MapPin, ExternalLink, Briefcase, Newspaper, Activity, Users, AlertTriangle, RefreshCw } from "lucide-react";
 import { getContactProfile } from "@/lib/contactProfile";
 import DeleteContactButton from "../DeleteContactButton";
 import VipToggle from "../VipToggle";
 import ContactEditForm from "./ContactEditForm";
+import MarkReviewedButton from "./MarkReviewedButton";
 
 export const dynamic = "force-dynamic";
 
@@ -131,6 +132,22 @@ export default async function ContactProfile({ params }: { params: Promise<{ id:
         </div>
       </div>
 
+      {/* Out-of-date banner — CRM info diverges from current LinkedIn */}
+      {c.infoStale && (
+        <div className="mt-4 flex items-start justify-between gap-3 rounded-2xl border border-red-200 bg-red-50 p-4">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" />
+            <div>
+              <div className="text-sm font-semibold text-red-700">Your info may be out of date</div>
+              <div className="mt-0.5 text-sm text-red-700/90">
+                {c.infoStaleReason ?? "LinkedIn shows changes your saved notes may not reflect yet."}
+              </div>
+            </div>
+          </div>
+          <MarkReviewedButton id={c.id} />
+        </div>
+      )}
+
       {/* Stat strip */}
       <div className="mt-5 grid grid-cols-2 gap-4 rounded-2xl border border-hairline bg-white p-4 sm:grid-cols-4">
         <Stat label="Days since contact" value={daysSince(c.lastContactedAt)} />
@@ -191,6 +208,29 @@ export default async function ContactProfile({ params }: { params: Promise<{ id:
           </div>
         )}
       </div>
+
+      {/* Auto-updated from LinkedIn — audit trail of job moves / role changes Dexa applied */}
+      {(c.fieldUpdates ?? []).length > 0 && (
+        <div className="mt-5 rounded-2xl border border-hairline bg-white p-5">
+          <h2 className="flex items-center gap-2 text-sm font-semibold">
+            <RefreshCw className="h-4 w-4 text-muted" /> Auto-updated from LinkedIn
+          </h2>
+          <p className="mt-1 text-xs text-muted">
+            Dexa kept these fields current. Here&apos;s what your CRM said before and when it switched.
+          </p>
+          <ul className="mt-3 space-y-2">
+            {[...(c.fieldUpdates ?? [])].reverse().map((u, i) => (
+              <li key={i} className="flex flex-wrap items-center gap-x-2 text-sm">
+                <span className="font-medium capitalize text-ink">{u.field}</span>
+                <span className="text-red-600 line-through">{u.old ?? "—"}</span>
+                <span className="text-muted">→</span>
+                <span className="font-medium text-ink">{u.new}</span>
+                <span className="text-xs text-muted">· {fmtDate(u.at)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Meeting intel — structured fields Dexa parsed from your meeting notes */}
       {(() => {

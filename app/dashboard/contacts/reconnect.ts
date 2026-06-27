@@ -136,16 +136,16 @@ export async function reconnectDraftAction(contactId: string): Promise<Reconnect
         newsClaims.map((n) => `- ${shortDate(n.eventDate)} · ${n.field}: ${n.value.slice(0, 200)}`).join("\n"),
     );
   }
-  if (ctx?.currentFocus) lines.push(`My current focus (for relevance, do NOT pitch unless natural): ${ctx.currentFocus}`);
+  if (ctx?.currentFocus) lines.push(`My current focus (context only — do NOT bring it up or use it as a reason to reach out): ${ctx.currentFocus}`);
 
   const res = await extractJSON<{ message: string; why: string }>({
     tier: "strong",
     system:
-      "You are Dexa, drafting a reconnection message AS THE USER (first person) to someone they ALREADY KNOW but have not spoken to in a while. " +
+      "You are Dexa, drafting a reconnection message AS THE USER (first person) to someone they ALREADY KNOW and have met before, but have not spoken to in a while. " +
       TONE_GUIDE +
-      " The goal is a warm, genuine, RELATIONSHIP-FIRST reconnection — not a pitch. Lead with the person, not an ask. " +
-      "Ground it in the MOST relevant concrete detail from the history below (a past meeting, a note about them, something they're working on, recent news) — reference ONE specific thing naturally; never list several. " +
-      "If there is no concrete detail, write a sincere no-agenda hello. NEVER invent facts, companies, events, or shared history that is not in the dossier. Use the recipient's real first name. Keep it to the short text-message length described above." +
+      " The goal is a warm, genuine, RELATIONSHIP-FIRST reconnection between two people who know each other — not a pitch, not a networking intro. Lead with the relationship and the simple wish to catch up, never with their work or an ask. " +
+      "PREFER to anchor on SHARED history — a past meeting the two of you had, a prior conversation, or a note YOU wrote about them — over their professional activities. You may mention what they're working on only CASUALLY, the way an old friend would ('how's X coming along?'), never as a compliment, a discovery, or the reason you're reaching out. Reference at most ONE specific thing, naturally; never list several. " +
+      "If there is no concrete shared detail, just write a sincere 'it's been too long, we should catch up' note with no agenda. NEVER invent facts, companies, events, or shared history that is not in the dossier. Use the recipient's real first name. Keep it to the short text-message length described above." +
       (style
         ? `\n\nWrite in the user's own voice — their diction, warmth, and characteristic phrasing (ignore any email greetings/sign-offs):\n${style}`
         : ""),

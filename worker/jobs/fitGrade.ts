@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { contacts, userContext } from "@/db/schema";
 import { env } from "@/lib/env";
 import { researchFirm, researchFirms, firmKey } from "@/lib/research/firm";
+import { reconcileAllProfiles } from "@/lib/sync/profileReconcile";
 import { gradeFitBatch, type FitInput, type UserFocus } from "@/lib/scoring/fit";
 import { runRecompute } from "./recompute";
 
@@ -144,6 +145,11 @@ function gradePriority(c: Contact): number {
  * watches re-grade at the start of the pass rather than the end.
  */
 export async function runFitGrade(): Promise<void> {
+  // First reconcile LinkedIn → CRM (pick the focus-relevant current role, auto-apply job moves,
+  // flag stale notes). A contact whose firm just changed will then be detected below as needing
+  // a re-grade, with fresh firm research for the new firm.
+  await reconcileAllProfiles();
+
   const us = await db.select().from(userContext);
   const ctxByUser = new Map(us.map((u) => [u.userId, u]));
   const all = await db.select().from(contacts);

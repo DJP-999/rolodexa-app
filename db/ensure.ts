@@ -145,6 +145,11 @@ export async function ensureSchema(sql: {
     "summary" text,
     "updated_at" timestamptz NOT NULL DEFAULT now()
   )`);
+  // LinkedIn-vs-CRM reconciliation (auto-update audit + notes-stale flag).
+  await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "field_updates" jsonb DEFAULT '[]'::jsonb`);
+  await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "info_stale" boolean DEFAULT false`);
+  await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "info_stale_reason" text`);
+  await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "info_stale_at" timestamptz`);
   // Incremental fit-grading bookkeeping.
   await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "fit_graded_at" timestamptz`);
   await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "fit_graded_company" text`);

@@ -23,6 +23,8 @@ export type Row = {
   highValue: boolean | null;
   lastDays: string;
   lastContactedAt: string | null;
+  infoStale?: boolean;
+  infoStaleReason?: string | null;
   customFields: Record<string, string>;
   normalizedFields: Record<string, string>;
   pitchbookData: Record<string, string> | null;
@@ -492,7 +494,21 @@ export function ContactsTable({
     }
     switch (col.key) {
       case "company":
-        return r.company ?? "—";
+        return r.company ? (
+          <span className="inline-flex items-center gap-1.5">
+            <span className={r.infoStale ? "font-medium text-red-600" : ""}>{r.company}</span>
+            {r.infoStale && (
+              <span
+                title={r.infoStaleReason ?? "Your CRM info may be out of date vs their LinkedIn."}
+                className="rounded bg-red-50 px-1.5 py-0.5 text-[10px] font-medium text-red-600 ring-1 ring-red-200"
+              >
+                Out of date
+              </span>
+            )}
+          </span>
+        ) : (
+          <span className="text-muted">—</span>
+        );
       case "email":
         return r.email ? (
           <a href={`mailto:${r.email}`} className="text-[#2d6cf6] hover:underline" onClick={(e) => e.stopPropagation()}>

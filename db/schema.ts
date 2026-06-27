@@ -60,6 +60,13 @@ export const contacts = pgTable("contacts", {
   pitchbookData: jsonb("pitchbook_data").$type<Record<string, string>>(),
   // How this contact entered the rolodex: manual | meeting | csv | split | linkedin.
   source: text("source"),
+  // LinkedIn-vs-CRM reconciliation. fieldUpdates = audit log of auto-applied changes (a job move
+  // or a role-priority shift). infoStale flags that LinkedIn changed in a way the user's freeform
+  // notes likely don't reflect yet — surfaced in red until the user reviews.
+  fieldUpdates: jsonb("field_updates").$type<Array<{ field: string; old: string | null; new: string; at: string; source: string }>>().default([]),
+  infoStale: boolean("info_stale").default(false),
+  infoStaleReason: text("info_stale_reason"),
+  infoStaleAt: timestamp("info_stale_at", { withTimezone: true }),
   // Incremental fit-grading bookkeeping: when it was last fit-graded, the firm it was graded
   // against (so a firm move forces a re-grade), and a model+prompt signature (so switching the
   // grading model or changing the rubric re-grades everyone exactly once).

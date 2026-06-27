@@ -9,7 +9,17 @@ import { contacts } from "@/db/schema";
 import { isConfigured } from "@/lib/env";
 import { extractJSON } from "@/lib/llm";
 import { getPrimaryUser } from "@/lib/user";
+import { markInfoReviewed } from "@/lib/sync/profileReconcile";
 import { enqueue, runOnce } from "@/worker/scheduler";
+
+/** Clear the "info out of date vs LinkedIn" flag once the user has reviewed their notes. */
+export async function markContactReviewedAction(contactId: string): Promise<void> {
+  const user = await getPrimaryUser();
+  if (!user || !contactId) return;
+  await markInfoReviewed(user.id, contactId);
+  revalidatePath(`/dashboard/contacts/${contactId}`);
+  revalidatePath("/dashboard/contacts");
+}
 
 type Rel = "family" | "friend" | "coworker" | "investor" | "vendor" | "other";
 type NewContact = typeof contacts.$inferInsert;

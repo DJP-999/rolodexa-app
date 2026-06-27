@@ -153,6 +153,8 @@ export default async function ContactsPage({
     highValue: c.highValue,
     lastDays: days(c.lastContactedAt),
     lastContactedAt: c.lastContactedAt ? new Date(c.lastContactedAt).toISOString() : null,
+    infoStale: c.infoStale ?? false,
+    infoStaleReason: c.infoStaleReason ?? null,
     customFields: (c.customFields ?? {}) as Record<string, string>,
     normalizedFields: (c.normalizedFields ?? {}) as Record<string, string>,
     pitchbookData: (c.pitchbookData ?? null) as Record<string, string> | null,
