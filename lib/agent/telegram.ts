@@ -1,0 +1,295 @@
+import { and, eq } from "drizzle-orm";
+import { db } from "@/db";
+import { contacts, suggestions, userContext } from "@/db/schema";
+import { answerCallback, sendMessage, type ApprovalButton } from "@/lib/integrations/telegram";
+import { resolveChannel } from "@/lib/outreach/deliver";
+import { SNOOZE_DAYS } from "@/lib/outreach/suppress";
+import { buildAgentContext } from "@/lib/agent/context";
+import { getWritingStyleFor } from "@/lib/agent/style";
+import { complete } from "@/lib/llm";
+import { TONE_GUIDE, stripEmDashes } from "@/lib/agent/tone";
+
+type Contact = typeof contacts.$inferSelect;
+
+// ---- Button builders (shared with the webhook) --------------------------------------------
+
+/** After "Reach out": the send controls for a drafted message (keyed by suggestion id). */
+export const APPROVE_BUTTONS = (id: string): ApprovalButton[] => [
+  { label: "✅ Approve & send", data: `approve:${id}` },
+  { label: "✏️ Edit", data: `edit:${id}` },
+  { label: "✕ Cancel", data: `cancel:${id}` },
+];
+
+/** First-stage controls on a contact card surfaced in chat / a digest (keyed by CONTACT id). */
+export const CONTACT_BUTTONS = (cid: string): ApprovalButton[] => [
+  { label: "✍️ Reach out", data: `reachC:${cid}` },
+  { label: "😴 Snooze", data: `snoozeC:${cid}` },
+  { label: "✕ Dismiss", data: `dismissC:${cid}` },
+  { label: "🚫 Block", data: `blockC:${cid}` },
+];
+
+// ---- Helpers ------------------------------------------------------------------------------
+
+function notesOf(c: Contact): string {
+  const cf = (c.customFields ?? {}) as Record<string, string>;
+  const key = Object.keys(cf).find((k) => /note|background|summary|description|comment|bio|about/i.test(k));
+  return [cf["Meeting Notes"], key ? cf[key] : "", c.summary ?? ""].filter(Boolean).join(" — ").slice(0, 500);
+}
+
+function metaLine(c: Contact): string {
+  return [c.role, c.company].filter(Boolean).join(" · ");
+}
+
+/** Resolve a contact the user named in chat: exact name first, then a confident partial match. */
+export async function resolveContactByName(userId: string, name: string): Promise<Contact | null> {
+  const n = name.trim().toLowerCase();
+  if (n.length < 2) return null;
+  const all = await db.select().from(contacts).where(eq(contacts.userId, userId));
+  const people = all.filter((c) => !c.isOrganization);
+  const exact = people.find((c) => c.name.toLowerCase() === n);
+  if (exact) return exact;
+  const starts = people.filter((c) => c.name.toLowerCase().startsWith(n));
+  if (starts.length === 1) return starts[0];
+  const contains = people.filter((c) => c.name.toLowerCase().includes(n));
+  if (contains.length === 1) return contains[0];
+  // First-name only match, if unambiguous.
+  const byFirst = people.filter((c) => c.name.toLowerCase().split(/\s+/)[0] === n);
+  if (byFirst.length === 1) return byFirst[0];
+  return null;
+}
+
+/** Draft a short, warm reconnect note AS the user, in their learned voice. */
+async function draftReconnect(c: Contact): Promise<string> {
+  const style = await getWritingStyleFor(c.userId, "catch_up");
+  const ctx = (await db.select().from(userContext).where(eq(userContext.userId, c.userId)).limit(1))[0];
+  const raw = await complete({
+    tier: "strong",
+    system:
+      "You write a reconnection text AS THE USER (first person) to someone they ALREADY KNOW and have met before. " +
+      TONE_GUIDE +
+      (style ? `\n\nWrite in the user's own voice: ${style}` : ""),
+    messages: [
+      {
+        role: "user",
+        content:
+          `Reconnect with ${c.name}${metaLine(c) ? `, ${metaLine(c)}` : ""}.` +
+          (notesOf(c) ? ` What I know about them: ${notesOf(c)}.` : "") +
+          (ctx?.currentFocus ? ` (My focus, context only, do not pitch: ${ctx.currentFocus}.)` : ""),
+      },
+    ],
+    maxTokens: 160,
+    temperature: 0.6,
+  });
+  const t = stripEmDashes((raw ?? "").trim());
+  if (t && !t.startsWith("[llm-stub") && !/\[[^\]]*\]/.test(t)) return t;
+  const first = c.name.split(/\s+/)[0] || "there";
+  return `${first}, it's been too long! No agenda, you just came to mind. Free to catch up soon?`;
+}
+
+/** Generate a draft + persist a pending suggestion to hang the Approve/Send flow on. Returns id. */
+async function createDraftSuggestion(c: Contact): Promise<string | null> {
+  const message = await draftReconnect(c);
+  const row = (
+    await db
+      .insert(suggestions)
+      .values({
+        userId: c.userId,
+        contactId: c.id,
+        triggerType: "re_engage",
+        reason: `You asked Dexa to reach out to ${c.name}.`,
+        draftMessage: message,
+        intentLabel: "Reconnect",
+        priority: "medium",
+        score: 0.6,
+        claimIds: [],
+      })
+      .returning({ id: suggestions.id })
+  )[0];
+  return row?.id ?? null;
+}
+
+async function channelVerb(c: Contact): Promise<string> {
+  const ch = await resolveChannel(c);
+  return ch === "linkedin"
+    ? "Will send as a LinkedIn DM"
+    : ch === "email"
+      ? "Will send via email"
+      : "No channel on file — open Rolodexa to send manually";
+}
+
+// ---- Contact-card callback actions (reachC / snoozeC / dismissC / blockC) -------------------
+
+/** Handle a tap on a contact card surfaced in chat or a digest. */
+export async function handleContactAction(
+  userId: string,
+  action: string,
+  contactId: string,
+  chatId: string,
+  callbackId: string,
+): Promise<void> {
+  const c = (
+    await db.select().from(contacts).where(and(eq(contacts.id, contactId), eq(contacts.userId, userId))).limit(1)
+  )[0];
+  if (!c) {
+    await answerCallback(callbackId, "That contact is no longer available.");
+    return;
+  }
+
+  if (action === "snoozeC") {
+    await db.update(contacts).set({ outreachSnoozedUntil: new Date(Date.now() + SNOOZE_DAYS * 86_400_000) }).where(eq(contacts.id, c.id));
+    await answerCallback(callbackId, `Snoozed ${c.name} for 1 month 😴`);
+    return;
+  }
+  if (action === "dismissC") {
+    await db.update(contacts).set({ outreachDismissedAt: new Date() }).where(eq(contacts.id, c.id));
+    await answerCallback(callbackId, `Dismissed ${c.name} ✓`);
+    return;
+  }
+  if (action === "blockC") {
+    await db.update(contacts).set({ outreachBlocked: true }).where(eq(contacts.id, c.id));
+    await answerCallback(callbackId, `Blocked — no more updates on ${c.name} 🚫`);
+    return;
+  }
+  if (action === "reachC") {
+    await answerCallback(callbackId, "Drafting…");
+    const sid = await createDraftSuggestion(c);
+    const draft = sid
+      ? (await db.select({ d: suggestions.draftMessage }).from(suggestions).where(eq(suggestions.id, sid)).limit(1))[0]?.d
+      : null;
+    if (sid && draft) {
+      await sendMessage(chatId, `Draft to ${c.name} — ${await channelVerb(c)}:\n\n${draft}`, APPROVE_BUTTONS(sid), { plain: true });
+    } else {
+      await sendMessage(chatId, `Couldn't draft a note for ${c.name} right now. Try again in a moment.`, undefined, { plain: true });
+    }
+    return;
+  }
+  await answerCallback(callbackId, "Got it ✓");
+}
+
+// ---- Free-text conversation + commands -----------------------------------------------------
+
+type Command = { verb: "reach" | "snooze" | "dismiss" | "block"; name: string };
+
+/** Parse an explicit action command like "snooze Mitesh" or "draft a note to Nick Larson". */
+function parseCommand(text: string): Command | null {
+  const t = text.trim();
+  let m =
+    t.match(/^(?:reach out to|draft (?:a )?(?:note|message|email)?\s*(?:to|for)?|message|write|ping|email)\s+(.+)$/i);
+  if (m) return { verb: "reach", name: m[1].trim() };
+  m = t.match(/^(?:snooze|mute)\s+(.+)$/i);
+  if (m) return { verb: "snooze", name: m[1].trim() };
+  m = t.match(/^(?:dismiss|ignore)\s+(.+)$/i);
+  if (m) return { verb: "dismiss", name: m[1].trim() };
+  m = t.match(/^(?:block|stop updates (?:on|for))\s+(.+)$/i);
+  if (m) return { verb: "block", name: m[1].trim() };
+  return null;
+}
+
+const HELP =
+  "👋 I'm Dexa, your relationship assistant. You can just talk to me here. Try:\n\n" +
+  "• \"who should I reach out to today?\"\n" +
+  "• \"draft a note to Nick Larson\"\n" +
+  "• \"snooze Mitesh\" / \"dismiss Tero\" / \"block X\"\n" +
+  "• \"what do I know about Plexo Capital?\"\n" +
+  "• \"who in my network does VC secondaries?\"\n\n" +
+  "And every update I send has buttons to Reach out, Snooze, Dismiss, or Block in one tap.";
+
+/** Top contacts worth reaching out to now (high relevance, stale or never contacted, not muted). */
+async function topReachOut(userId: string, n: number): Promise<Contact[]> {
+  const all = await db.select().from(contacts).where(eq(contacts.userId, userId));
+  const now = Date.now();
+  return all
+    .filter((c) => !c.isOrganization && !c.outreachBlocked && (c.relevance ?? 0) >= 40)
+    .filter((c) => !(c.outreachSnoozedUntil && new Date(c.outreachSnoozedUntil).getTime() > now))
+    .map((c) => {
+      const lastDays = c.lastContactedAt ? (now - new Date(c.lastContactedAt).getTime()) / 86_400_000 : 9999;
+      return { c, score: (c.relevance ?? 0) + Math.min(60, lastDays / 10) };
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, n)
+    .map((x) => x.c);
+}
+
+/**
+ * The Telegram brain. Routes a free-text message to: a direct command (with confirmation /
+ * draft buttons), a "who should I reach out to" actionable list, or a conversational answer
+ * grounded in the user's real network.
+ */
+export async function handleDexaText(userId: string, chatId: string, text: string): Promise<void> {
+  const t = text.trim();
+  if (!t) return;
+
+  if (/^\/?(start|help|menu)\b/i.test(t)) {
+    await sendMessage(chatId, HELP, undefined, { plain: true });
+    return;
+  }
+
+  // 1) Direct command on a named contact.
+  const cmd = parseCommand(t);
+  if (cmd) {
+    const c = await resolveContactByName(userId, cmd.name);
+    if (!c) {
+      await sendMessage(chatId, `I don't see "${cmd.name}" in your rolodex. Want me to search by company instead?`, undefined, { plain: true });
+      return;
+    }
+    if (cmd.verb === "reach") {
+      const sid = await createDraftSuggestion(c);
+      const draft = sid
+        ? (await db.select({ d: suggestions.draftMessage }).from(suggestions).where(eq(suggestions.id, sid)).limit(1))[0]?.d
+        : null;
+      if (sid && draft) {
+        await sendMessage(chatId, `Draft to ${c.name} — ${await channelVerb(c)}:\n\n${draft}`, APPROVE_BUTTONS(sid), { plain: true });
+      } else {
+        await sendMessage(chatId, `Couldn't draft that right now. Try again in a moment.`, undefined, { plain: true });
+      }
+      return;
+    }
+    const patch =
+      cmd.verb === "snooze"
+        ? { outreachSnoozedUntil: new Date(Date.now() + SNOOZE_DAYS * 86_400_000) }
+        : cmd.verb === "dismiss"
+          ? { outreachDismissedAt: new Date() }
+          : { outreachBlocked: true };
+    await db.update(contacts).set(patch).where(eq(contacts.id, c.id));
+    const note =
+      cmd.verb === "snooze"
+        ? `Snoozed ${c.name} for 1 month 😴`
+        : cmd.verb === "dismiss"
+          ? `Dismissed ${c.name} ✓`
+          : `Blocked ${c.name} — no more updates 🚫`;
+    await sendMessage(chatId, note, undefined, { plain: true });
+    return;
+  }
+
+  // 2) "Who should I reach out to" → actionable cards.
+  if (/\bwho\b.*\b(reach|contact|follow ?up|connect|catch up|message)\b|reach out to(?:day)?\b|top (?:contacts|people)|who.*today/i.test(t)) {
+    const list = await topReachOut(userId, 5);
+    if (!list.length) {
+      await sendMessage(chatId, "Your network's all warm right now, nobody overdue. Ask me about anyone specific and I'll pull them up.", undefined, { plain: true });
+      return;
+    }
+    await sendMessage(chatId, `Here are ${list.length} worth reaching out to:`, undefined, { plain: true });
+    for (const c of list) {
+      const lastDays = c.lastContactedAt ? Math.floor((Date.now() - new Date(c.lastContactedAt).getTime()) / 86_400_000) : null;
+      const when = lastDays === null ? "no touch on record" : `last touch ${lastDays}d ago`;
+      await sendMessage(chatId, `${c.name}${metaLine(c) ? ` — ${metaLine(c)}` : ""}\n${when} · relevance ${c.relevance ?? "—"}`, CONTACT_BUTTONS(c.id), { plain: true });
+    }
+    return;
+  }
+
+  // 3) Conversational — grounded in the real network.
+  const ctx = (await db.select().from(userContext).where(eq(userContext.userId, userId)).limit(1))[0];
+  const context = await buildAgentContext(userId, t);
+  const reply = await complete({
+    tier: "strong",
+    system:
+      `You are Dexa, the relationship and deal-flow assistant for ${ctx?.role ?? "a dealmaker"}, replying inside Telegram. ` +
+      "Be warm, concise, and specific, like a sharp chief-of-staff texting back. Use ONLY the CONTEXT for facts about specific people; if someone isn't in it, say you don't see them in the loaded set rather than inventing. " +
+      "If they clearly want to act on someone (reach out, snooze, dismiss, block), tell them they can just say e.g. 'draft a note to <name>' or 'snooze <name>'. " +
+      "Never use em-dashes or en-dashes; use periods or commas.\n\n=== CONTEXT ===\n" +
+      context,
+    messages: [{ role: "user", content: t }],
+    maxTokens: 700,
+  });
+  await sendMessage(chatId, stripEmDashes(reply), undefined, { plain: true });
+}

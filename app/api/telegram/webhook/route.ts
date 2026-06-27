@@ -13,15 +13,11 @@ import { env } from "@/lib/env";
 import { answerCallback, sendMessage } from "@/lib/integrations/telegram";
 import { deliverOutreach, resolveChannel } from "@/lib/outreach/deliver";
 import { SNOOZE_DAYS } from "@/lib/outreach/suppress";
+import { APPROVE_BUTTONS, handleContactAction, handleDexaText } from "@/lib/agent/telegram";
 
 export const dynamic = "force-dynamic";
 
-// Second stage (shown after "Reach out"): the actual send controls for the drafted message.
-const APPROVE_BUTTONS = (id: string) => [
-  { label: "✅ Approve & send", data: `approve:${id}` },
-  { label: "✏️ Edit", data: `edit:${id}` },
-  { label: "✕ Cancel", data: `cancel:${id}` },
-];
+const CONTACT_ACTIONS = ["reachC", "snoozeC", "dismissC", "blockC"];
 
 async function setPendingEdit(userId: string, suggestionId: string | null): Promise<void> {
   const row = (
@@ -64,9 +60,18 @@ export async function POST(req: Request) {
     const cb = body.callback_query;
     if (cb?.data) {
       const chatId = String(cb.message?.chat?.id ?? cb.from?.id ?? "");
-      const [action, suggestionId] = String(cb.data).split(":");
-      const s = suggestionId
-        ? (await db.select().from(suggestions).where(eq(suggestions.id, suggestionId)).limit(1))[0]
+      const [action, id] = String(cb.data).split(":");
+      const primaryUser = (await db.select().from(users).limit(1))[0];
+
+      // Contact-card actions (from chat replies / the digest) operate on a CONTACT id, and don't
+      // require a pre-existing suggestion — handle them up front.
+      if (primaryUser && CONTACT_ACTIONS.includes(action)) {
+        await handleContactAction(primaryUser.id, action, id, chatId, cb.id);
+        return NextResponse.json({ ok: true });
+      }
+
+      const s = id
+        ? (await db.select().from(suggestions).where(eq(suggestions.id, id)).limit(1))[0]
         : undefined;
 
       if (!s) {
@@ -224,13 +229,15 @@ export async function POST(req: Request) {
           });
           await sendMessage(
             chatId,
-            "✅ Connected to Rolodexa. Your briefs — and any outreach you approve — will arrive here.",
+            "✅ Connected. I'm Dexa, your relationship assistant. Just talk to me here, ask 'who should I reach out to today?', say 'draft a note to <name>', or 'snooze <name>'. Every update I send has one-tap actions too.",
+            undefined,
+            { plain: true },
           );
         } else {
-          // Mid-edit? Treat this message as the revised draft and re-present it.
           const pendingEdit = (account.metadata as { pendingEdit?: string } | null)?.pendingEdit;
           const newText = typeof message.text === "string" ? message.text.trim() : "";
           if (pendingEdit && newText) {
+            // Mid-edit: treat this message as the revised draft and re-present it.
             const s = (
               await db.select().from(suggestions).where(eq(suggestions.id, pendingEdit)).limit(1)
             )[0];
@@ -240,13 +247,11 @@ export async function POST(req: Request) {
                 .update(suggestions)
                 .set({ draftMessage: newText, updatedAt: new Date() })
                 .where(eq(suggestions.id, s.id));
-              await sendMessage(
-                chatId,
-                `Updated draft:\n\n${newText}`,
-                APPROVE_BUTTONS(s.id),
-                { plain: true },
-              );
+              await sendMessage(chatId, `Updated draft:\n\n${newText}`, APPROVE_BUTTONS(s.id), { plain: true });
             }
+          } else if (newText) {
+            // Otherwise it's a conversation with Dexa — answer or act on it.
+            await handleDexaText(user.id, chatId, newText);
           }
         }
 

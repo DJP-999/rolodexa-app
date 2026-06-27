@@ -15,6 +15,7 @@ import {
   type GateContext,
 } from "@/lib/notifications/gate";
 import { sendMessage } from "@/lib/integrations/telegram";
+import { CONTACT_BUTTONS } from "@/lib/agent/telegram";
 import { outreachSuppressed, isNewsTrigger } from "@/lib/outreach/suppress";
 import { cadenceForRelevance } from "@/lib/scoring/relevance";
 
@@ -62,18 +63,25 @@ async function sendColdDigest(userId: string, email: string, slug: string): Prom
     return;
   }
 
-  const lines = cold.map(({ c, last }) => {
+  // Actionable, not a dead list: a header, then one card per contact with one-tap controls so
+  // even a "nothing urgent" brief can be acted on entirely from Telegram.
+  await sendMessage(
+    tg.externalId,
+    `${headerFor(slug)} — nothing urgent, but ${cold.length} relationship${cold.length > 1 ? "s" : ""} worth warming up:`,
+    undefined,
+    { plain: true },
+  );
+  for (const { c, last } of cold) {
     const meta = [c.role, c.company].filter(Boolean).join(" · ");
     const when = last === null ? "no touch on record" : `last touch ${last}d ago`;
-    return `• ${c.name}${meta ? ` — ${meta}` : ""} (${when})`;
-  });
-  const body =
-    `${headerFor(slug)} — nothing urgent today.\n\n` +
-    `${cold.length} relationship${cold.length > 1 ? "s" : ""} worth warming up:\n` +
-    lines.join("\n") +
-    `\n\nOpen Rolodexa and tap Reconnect to send a personal note in one tap.`;
-  await sendMessage(tg.externalId, body, undefined, { plain: true });
-  console.log(`[brief:${slug}] sent cold digest (${cold.length}) to ${email}`);
+    await sendMessage(
+      tg.externalId,
+      `${c.name}${meta ? ` — ${meta}` : ""}\n${when} · relevance ${c.relevance ?? "—"}`,
+      CONTACT_BUTTONS(c.id),
+      { plain: true },
+    );
+  }
+  console.log(`[brief:${slug}] sent actionable cold digest (${cold.length}) to ${email}`);
 }
 
 function startOfToday(): Date {
