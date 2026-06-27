@@ -3,7 +3,7 @@ import { db } from "@/db";
 import { connectedAccounts } from "@/db/schema";
 import { env, isConfigured } from "@/lib/env";
 import { listRecentMessages } from "@/lib/integrations/nylas";
-import { getEmails, listAccounts, unipileConfigured } from "@/lib/integrations/unipile";
+import { getEmails, getFolders, listAccounts, unipileConfigured } from "@/lib/integrations/unipile";
 import { logTouch, normEmail, selfEmails } from "@/lib/sync/track";
 import { cleanupNoiseProspects } from "@/lib/sync/noise";
 
@@ -74,12 +74,24 @@ export async function runEmailPoll(): Promise<void> {
       const self = await selfEmails(g.userId);
       const own = acctEmailById.get(g.externalId);
       if (own) self.add(own);
-      // Paginate by date. Unipile's default list returns RECEIVED mail, so fetch SENT mail
-      // separately via a from=<own address> filter and merge — otherwise outbound emails
-      // (and the contacts they belong to) are never seen.
+      // The default email list returns RECEIVED mail only; the Sent folder is separate. Look it
+      // up by role and fetch it explicitly, then merge — otherwise outbound emails (and the
+      // contacts they belong to) are never seen.
       const cutoffIso = new Date(cutoff).toISOString();
       const received = await getEmails(g.externalId, env.EMAIL_POLL_CAP, cutoffIso);
-      const sentMail = own ? await getEmails(g.externalId, env.EMAIL_POLL_CAP, cutoffIso, { from: own }) : [];
+      const folders = await getFolders(g.externalId);
+      const sentFolder =
+        folders.find((f) => String(f?.role).toLowerCase() === "sent") ??
+        folders.find((f) => /sent/i.test(String(f?.name ?? "")));
+      const sentId = sentFolder?.provider_id ?? sentFolder?.id ?? null;
+      const sentMail = sentId
+        ? await getEmails(g.externalId, env.EMAIL_POLL_CAP, cutoffIso, { folder: sentId })
+        : [];
+      console.log(
+        `[emailPoll] folders=[${folders.map((f) => f?.role ?? f?.name).join(",")}] sentFolder=${
+          sentId ? "found" : "NONE"
+        } received=${received.length} sent=${sentMail.length}`,
+      );
       const byId = new Map<string, any>();
       for (const e of [...received, ...sentMail]) {
         const k = e?.id ?? e?.message_id;

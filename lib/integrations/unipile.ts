@@ -254,6 +254,19 @@ export async function getEmails(
   return out;
 }
 
+/** Email folders for an account (Gmail labels / IMAP folders) with their role (inbox|sent|…). */
+export async function getFolders(accountId: string): Promise<any[]> {
+  const client = await getClient();
+  if (!client) return [];
+  try {
+    const res: any = await client.email.getAllFolders({ account_id: accountId });
+    return res?.items ?? res?.data ?? (Array.isArray(res) ? res : []);
+  } catch (e) {
+    console.error("[unipile] getFolders", e);
+    return [];
+  }
+}
+
 /**
  * Calendar — the SDK doesn't wrap it, so we call Unipile's REST API directly with the
  * SAME connected Google/Outlook account as email. Reuses the existing grant (no new
