@@ -74,8 +74,18 @@ export async function runEmailPoll(): Promise<void> {
       const self = await selfEmails(g.userId);
       const own = acctEmailById.get(g.externalId);
       if (own) self.add(own);
-      // Paginate by date so high-volume mailboxes don't truncate recent (incl. sent) mail.
-      const emails = await getEmails(g.externalId, env.EMAIL_POLL_CAP, new Date(cutoff).toISOString());
+      // Paginate by date. Unipile's default list returns RECEIVED mail, so fetch SENT mail
+      // separately via a from=<own address> filter and merge — otherwise outbound emails
+      // (and the contacts they belong to) are never seen.
+      const cutoffIso = new Date(cutoff).toISOString();
+      const received = await getEmails(g.externalId, env.EMAIL_POLL_CAP, cutoffIso);
+      const sentMail = own ? await getEmails(g.externalId, env.EMAIL_POLL_CAP, cutoffIso, { from: own }) : [];
+      const byId = new Map<string, any>();
+      for (const e of [...received, ...sentMail]) {
+        const k = e?.id ?? e?.message_id;
+        if (k) byId.set(String(k), e);
+      }
+      const emails = [...byId.values()];
       for (const e of emails) {
         const id = e?.id ?? e?.message_id;
         const dateRaw = e?.date ?? e?.timestamp ?? e?.received_date;

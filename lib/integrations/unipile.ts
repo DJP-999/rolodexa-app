@@ -225,7 +225,12 @@ export async function sendEmail(
  * folders incl. Sent. Paginates (250/page) up to `cap`, optionally only those after an ISO
  * datetime, so a busy mailbox doesn't truncate recent mail to a single page.
  */
-export async function getEmails(accountId: string, cap = 200, after?: string): Promise<any[]> {
+export async function getEmails(
+  accountId: string,
+  cap = 200,
+  after?: string,
+  extra?: Record<string, unknown>,
+): Promise<any[]> {
   const client = await getClient();
   if (!client) return [];
   const out: any[] = [];
@@ -237,6 +242,7 @@ export async function getEmails(accountId: string, cap = 200, after?: string): P
         limit: 250,
         ...(cursor ? { cursor } : {}),
         ...(after ? { after } : {}),
+        ...(extra ?? {}),
       });
       const items: any[] = res?.items ?? res?.data ?? [];
       out.push(...items);
