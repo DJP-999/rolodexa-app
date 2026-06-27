@@ -121,10 +121,13 @@ export async function gradeFitBatch(batch: FitInput[], focus: UserFocus): Promis
     temperature: 0,
   });
   const out: FitResult[] = [];
+  // Only trust ids we actually sent — a strong model occasionally mangles or hallucinates the
+  // echoed id (e.g. a non-hex "uuid"), which would otherwise blow up the persist UPDATE.
+  const validIds = new Set(batch.map((b) => b.id));
   try {
     const obj = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] ?? "{}");
     for (const it of obj.items ?? []) {
-      if (!it?.id) continue;
+      if (!it?.id || !validIds.has(String(it.id))) continue;
       let fit = Number(it.fit);
       if (!isFinite(fit)) fit = 0.4;
       fit = Math.max(0, Math.min(1, fit));

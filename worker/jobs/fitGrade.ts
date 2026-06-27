@@ -87,7 +87,9 @@ async function persist(updates: { id: string; fit: number; summary: string; rati
             ...(u.summary ? { summary: u.summary } : {}),
             ...(u.rationale ? { gradeRationale: u.rationale } : {}),
           })
-          .where(eq(contacts.id, u.id)),
+          .where(eq(contacts.id, u.id))
+          // Never let one bad row (e.g. a mangled id from the model) abort the whole job.
+          .catch((e) => console.error(`[fit-grade] persist skipped id=${u.id}:`, String(e))),
       ),
     );
   }
