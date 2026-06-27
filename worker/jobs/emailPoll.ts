@@ -1,6 +1,6 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { connectedAccounts } from "@/db/schema";
+import { connectedAccounts, contacts, interactions } from "@/db/schema";
 import { env, isConfigured } from "@/lib/env";
 import { listRecentMessages } from "@/lib/integrations/nylas";
 import { getEmails, getFolders, listAccounts, unipileConfigured } from "@/lib/integrations/unipile";
@@ -108,6 +108,28 @@ export async function runEmailPoll(): Promise<void> {
         const needle = env.DEBUG_EMAIL_ADDR.toLowerCase();
         const hits = emails.filter((e) => JSON.stringify(e ?? {}).toLowerCase().includes(needle));
         console.log(`[emailPoll-find] addr=${needle} matches=${hits.length}/${emails.length}`);
+        // Ground truth from the DB: does a contact match this address exactly, what email is
+        // actually stored on any "larson" contact, and how is the existing interaction attributed?
+        try {
+          const byEmail = await db
+            .select({ id: contacts.id, email: contacts.email, name: contacts.name })
+            .from(contacts)
+            .where(and(eq(contacts.userId, g.userId), sql`lower(${contacts.email}) = ${needle}`));
+          const likeName = needle.split("@")[0].replace(/[^a-z]/g, "").slice(0, 4) || "zzzz";
+          const byName = await db
+            .select({ id: contacts.id, email: contacts.email, name: contacts.name })
+            .from(contacts)
+            .where(and(eq(contacts.userId, g.userId), sql`lower(${contacts.name}) like ${"%" + likeName + "%"}`));
+          const ix = await db
+            .select({ id: interactions.id, contactId: interactions.contactId, cold: interactions.coldProspectId, cpe: interactions.counterpartyEmail, ref: interactions.sourceRef, at: interactions.occurredAt })
+            .from(interactions)
+            .where(and(eq(interactions.userId, g.userId), sql`lower(${interactions.counterpartyEmail}) = ${needle}`));
+          console.log(`[emailPoll-find] contactByEmail=${JSON.stringify(byEmail)}`);
+          console.log(`[emailPoll-find] nameMatches(${likeName})=${JSON.stringify(byName.map((r) => ({ ...r, email: JSON.stringify(r.email) })))}`);
+          console.log(`[emailPoll-find] existingInteractions=${JSON.stringify(ix)}`);
+        } catch (err) {
+          console.log(`[emailPoll-find] db probe error: ${String(err)}`);
+        }
         for (const e of hits.slice(0, 6)) {
           console.log(
             `[emailPoll-find] id=${e?.id ?? e?.message_id ?? e?.provider_id} date=${
