@@ -53,9 +53,6 @@ const schema = z.object({
   // Set to a contact's name to print targeted diagnostics in the message-backfill job
   // (does their chat exist in the synced set, and why did/didn't it attribute). Leave unset normally.
   DEBUG_BACKFILL_NAME: z.string().optional(),
-  // Set to a counterparty email address to dump any fetched message touching it from the email
-  // poll (which folder, to vs cc, date) — diagnoses why a specific contact isn't getting logged.
-  DEBUG_EMAIL_ADDR: z.string().optional(),
   // How deep the message backfill paginates the LinkedIn inbox. Newest-first, so older
   // relationships (most of the rolodex) need a high ceiling to be reached.
   MESSAGE_BACKFILL_CHAT_CAP: z.coerce.number().default(8000),
