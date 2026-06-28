@@ -65,6 +65,7 @@ export default async function ContactsPage({
   const sp = await searchParams;
   const [all, fieldGroupings] = await Promise.all([getContacts(), getFieldGroupings()]);
   const enriched = all?.filter((c) => c.enrichedAt).length ?? 0;
+  const vipCount = all?.filter((c) => c.highValue).length ?? 0;
 
   const q = (sp.q ?? "").toLowerCase();
   const rel = sp.rel ?? "";
@@ -81,6 +82,7 @@ export default async function ContactsPage({
     if (rel && (c.relationship ?? "other") !== rel) return false;
     if (tab === "enriched" && !c.enrichedAt) return false;
     if (tab === "needs" && c.relevance != null) return false;
+    if (tab === "vip" && !c.highValue) return false;
     // New = people you MET with or added manually in the last 7 days — never bulk CSV imports.
     if (
       tab === "new" &&
@@ -184,7 +186,7 @@ export default async function ContactsPage({
       )}
 
       <Suspense fallback={<div className="mt-5 h-[88px]" />}>
-        <ContactsFilters enriched={enriched} />
+        <ContactsFilters enriched={enriched} vip={vipCount} />
       </Suspense>
 
       {!all ? (

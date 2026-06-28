@@ -432,23 +432,28 @@ export function ContactsTable({
       return (b.relevance ?? -1) - (a.relevance ?? -1); // best-graded first within the firm
     });
   };
+  const colCompare = (a: Row, b: Row): number => {
+    const av = sortVal(a, sort!.key);
+    const bv = sortVal(b, sort!.key);
+    let c: number;
+    if (typeof av === "number" && typeof bv === "number") {
+      c = av - bv;
+    } else {
+      // Date-like string columns (e.g. "Date added" = 6/16/2026) must sort chronologically,
+      // not lexically — otherwise 6/16 sorts before 6/2.
+      const ad = parseMaybeDate(String(av));
+      const bd = parseMaybeDate(String(bv));
+      c = ad !== null || bd !== null ? (ad ?? -Infinity) - (bd ?? -Infinity) : String(av).localeCompare(String(bv));
+    }
+    return sort!.dir === "asc" ? c : -c;
+  };
+  // VIPs (high-value 🔥) are the must-watch list and are PINNED to the very top of every view —
+  // they never sort below anyone, regardless of firm rank or the active column sort.
+  const vips = filtered.filter((r) => r.highValue);
+  const rest = filtered.filter((r) => !r.highValue);
   const sorted = sort
-    ? [...filtered].sort((a, b) => {
-        const av = sortVal(a, sort.key);
-        const bv = sortVal(b, sort.key);
-        let c: number;
-        if (typeof av === "number" && typeof bv === "number") {
-          c = av - bv;
-        } else {
-          // Date-like string columns (e.g. "Date added" = 6/16/2026) must sort chronologically,
-          // not lexically — otherwise 6/16 sorts before 6/2.
-          const ad = parseMaybeDate(String(av));
-          const bd = parseMaybeDate(String(bv));
-          c = ad !== null || bd !== null ? (ad ?? -Infinity) - (bd ?? -Infinity) : String(av).localeCompare(String(bv));
-        }
-        return sort.dir === "asc" ? c : -c;
-      })
-    : clusterByFirm(filtered);
+    ? [...[...vips].sort(colCompare), ...[...rest].sort(colCompare)]
+    : [...[...vips].sort((a, b) => (b.relevance ?? -1) - (a.relevance ?? -1)), ...clusterByFirm(rest)];
 
   const toggleRow = async (id: string) => {
     if (open === id) return setOpen(null);

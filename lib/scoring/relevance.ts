@@ -51,10 +51,14 @@ export function recencySignal(lastDays: number | null, cadenceDays = 30): number
   return Number(Math.exp(-lastDays / Math.max(1, cadenceDays)).toFixed(4));
 }
 
-/** Higher-relevance contacts get a shorter check-in cadence (21d→45d). */
+/**
+ * Reconnect cadence by relevance. FLOOR IS ONE MONTH — never nudge to reach back out to someone
+ * contacted more recently than ~30 days, even the highest-relevance contacts. Higher relevance
+ * just means the shorter end of the 30→45-day range.
+ */
 export function cadenceForRelevance(relevance: number | null): number {
   if (relevance === null) return 45;
-  if (relevance >= 75) return 21;
-  if (relevance >= 50) return 30;
+  if (relevance >= 75) return 30;
+  if (relevance >= 50) return 38;
   return 45;
 }
