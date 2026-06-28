@@ -67,6 +67,10 @@ export const contacts = pgTable("contacts", {
   infoStale: boolean("info_stale").default(false),
   infoStaleReason: text("info_stale_reason"),
   infoStaleAt: timestamp("info_stale_at", { withTimezone: true }),
+  // Field-level staleness so the UI reddens the right cell: companyStale = a real firm move;
+  // emailStale = the stored email is a former-employer address (likely dead).
+  companyStale: boolean("company_stale").default(false),
+  emailStale: boolean("email_stale").default(false),
   // Incremental fit-grading bookkeeping: when it was last fit-graded, the firm it was graded
   // against (so a firm move forces a re-grade), and a model+prompt signature (so switching the
   // grading model or changing the rubric re-grades everyone exactly once).

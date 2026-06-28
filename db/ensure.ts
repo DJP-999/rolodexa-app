@@ -150,6 +150,8 @@ export async function ensureSchema(sql: {
   await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "info_stale" boolean DEFAULT false`);
   await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "info_stale_reason" text`);
   await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "info_stale_at" timestamptz`);
+  await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "company_stale" boolean DEFAULT false`);
+  await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "email_stale" boolean DEFAULT false`);
   // Incremental fit-grading bookkeeping.
   await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "fit_graded_at" timestamptz`);
   await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "fit_graded_company" text`);

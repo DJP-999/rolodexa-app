@@ -168,8 +168,23 @@ export default async function ContactProfile({ params }: { params: Promise<{ id:
         <div className="text-xs font-semibold tracking-wide text-[#c2683a]">PROFILE</div>
         <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Name">{c.name}</Field>
-          <Field label="Email">{c.email ?? "—"}</Field>
-          <Field label="Company">{c.company ?? "—"}</Field>
+          <Field label="Email">
+            {c.email ? (
+              <span className="inline-flex items-center gap-1.5">
+                <span className={c.emailStale ? "text-red-600 line-through" : ""}>{c.email}</span>
+                {c.emailStale && (
+                  <span className="rounded bg-red-50 px-1.5 py-0.5 text-[10px] font-medium text-red-600 ring-1 ring-red-200">
+                    former firm
+                  </span>
+                )}
+              </span>
+            ) : (
+              "—"
+            )}
+          </Field>
+          <Field label="Company">
+            <span className={c.companyStale ? "text-red-600" : ""}>{c.company ?? "—"}</span>
+          </Field>
           <Field label="Role">{c.role ?? "—"}</Field>
           <Field label="Location">{c.location ?? "—"}</Field>
           <Field label="LinkedIn">
@@ -203,8 +218,15 @@ export default async function ContactProfile({ params }: { params: Promise<{ id:
 
         {bio && (
           <div className="mt-5 border-t border-hairline pt-4">
-            <div className="text-sm font-medium text-ink">About {c.name.split(/\s+/)[0]}</div>
-            <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-muted">{bio}</p>
+            <div className="flex items-center gap-2 text-sm font-medium text-ink">
+              About {c.name.split(/\s+/)[0]}
+              {c.infoStale && (
+                <span className="rounded bg-red-50 px-1.5 py-0.5 text-[10px] font-medium text-red-600 ring-1 ring-red-200">
+                  may be out of date
+                </span>
+              )}
+            </div>
+            <p className={`mt-2 whitespace-pre-wrap text-sm leading-relaxed ${c.infoStale ? "text-red-700/80" : "text-muted"}`}>{bio}</p>
           </div>
         )}
       </div>

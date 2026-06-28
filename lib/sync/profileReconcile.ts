@@ -25,6 +25,26 @@ function norm(s?: string | null): string {
   return (s ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
 }
 
+// Personal/free mailboxes — never treated as a firm address.
+const GENERIC_EMAIL = new Set([
+  "gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "yahoo.com", "ymail.com",
+  "icloud.com", "me.com", "mac.com", "aol.com", "proton.me", "protonmail.com", "msn.com", "live.com",
+]);
+/** The brand label of a work email's domain (e.g. branden@savanocapital.com → "savanocapital"), or null. */
+function emailDomainBrand(email?: string | null): string | null {
+  const e = (email ?? "").toLowerCase().trim();
+  const at = e.indexOf("@");
+  if (at < 0) return null;
+  const domain = e.slice(at + 1);
+  if (!domain || GENERIC_EMAIL.has(domain)) return null;
+  return domain.split(".")[0].replace(/[^a-z0-9]/g, "") || null;
+}
+/** Does an email brand correspond to a company name (loose substring either way)? */
+function brandMatch(emailBrand: string, company?: string | null): boolean {
+  const c = norm(company).replace(/\s+/g, "");
+  return !!c && !!emailBrand && (c.includes(emailBrand) || emailBrand.includes(c));
+}
+
 /** Among a profile's CURRENT roles, the one most relevant to the user's focus. */
 export function pickPrimaryRole(profileData: unknown, focus: Focus): { company: string | null; position: string | null } | null {
   const pd = profileData as { experience?: Exp[] } | null;
@@ -61,9 +81,8 @@ export function pickPrimaryRole(profileData: unknown, focus: Focus): { company: 
 export function reconcileProfile(c: Contact, focus: Focus): Partial<Contact> | null {
   if (!c.profileData) return null;
   const pd = c.profileData as { experience?: Exp[] };
-  const currentRoles = (Array.isArray(pd?.experience) ? pd.experience : []).filter(
-    (e) => e?.current && (e.company || e.position),
-  );
+  const exp = Array.isArray(pd?.experience) ? pd.experience : [];
+  const currentRoles = exp.filter((e) => e?.current && (e.company || e.position));
   if (!currentRoles.length) return null;
   const currentCompanies = new Set(currentRoles.map((e) => norm(e.company ?? "")).filter(Boolean));
 
@@ -72,6 +91,21 @@ export function reconcileProfile(c: Contact, focus: Focus): Partial<Contact> | n
 
   const patch: Record<string, unknown> = {};
   const now = new Date();
+  const first = c.name.split(/\s+/)[0] || "They";
+
+  // ---- Former-employer email: the stored address belongs to a PAST role, not a current one, so
+  // it's likely dead and the bio that came with it is out of date. ----
+  const emailBrand = emailDomainBrand(c.email);
+  let formerFirm: string | null = null;
+  if (emailBrand) {
+    const matchesCurrent =
+      currentRoles.some((e) => brandMatch(emailBrand, e.company)) || brandMatch(emailBrand, primary.company);
+    if (!matchesCurrent) {
+      formerFirm = exp.find((e) => !e?.current && e.company && brandMatch(emailBrand, e.company))?.company ?? null;
+    }
+  }
+  const emailStale = !!formerFirm;
+  if (emailStale !== !!c.emailStale) patch.emailStale = emailStale;
 
   // Self-heal: keep ONLY genuine departures in the audit (a company whose old value is no longer
   // current). This drops title-only entries and concurrent-role "changes" the old logic recorded.
@@ -94,9 +128,12 @@ export function reconcileProfile(c: Contact, focus: Focus): Partial<Contact> | n
       patch.role = primary.position;
     }
     patch.fieldUpdates = updates.slice(-20);
+    patch.companyStale = true;
     patch.infoStale = true;
     patch.infoStaleAt = now;
-    patch.infoStaleReason = `LinkedIn shows they're now at ${primary.company}${primary.position ? ` as ${primary.position}` : ""} and no longer lists ${c.company}. Your notes may describe their prior role; review and update.`;
+    patch.infoStaleReason =
+      `LinkedIn shows they're now at ${primary.company}${primary.position ? ` as ${primary.position}` : ""} and no longer lists ${c.company}. Your notes may describe their prior role; review and update.` +
+      (emailStale ? ` Their ${c.email} address is a former-firm email and is likely dead.` : "");
     return patch as Partial<Contact>;
   }
 
@@ -107,12 +144,24 @@ export function reconcileProfile(c: Contact, focus: Focus): Partial<Contact> | n
     patch.company = primary.company;
     if (primary.position) patch.role = primary.position;
   }
+  if (c.companyStale) patch.companyStale = false; // company is current/correct here
 
-  // Clear a stale flag left by the old over-eager logic when there's no genuine departure on file.
-  const hasGenuineDeparture = cleaned.length > 0;
-  if (c.infoStale && !hasGenuineDeparture) {
-    patch.infoStale = false;
-    patch.infoStaleReason = null;
+  if (emailStale) {
+    // Company is fine, but the email + bio still point to the firm they left — flag, and surface
+    // the relationship play: they're a warm path into their former firm.
+    const nowAt = primary.company ? ` (now ${primary.position ? `${primary.position} at ` : ""}${primary.company})` : "";
+    patch.infoStale = true;
+    patch.infoStaleAt = now;
+    patch.infoStaleReason =
+      `${first} appears to have left ${formerFirm}${nowAt}. Their ${c.email} email is a former-firm address (likely dead) and their bio still describes ${formerFirm}. ` +
+      `If ${formerFirm} is a target for you, ${first} is a warm path to an intro to their former colleagues there.`;
+  } else {
+    // No genuine departure and no stale email → clear any flag left by older over-eager logic.
+    const hasGenuineDeparture = cleaned.length > 0;
+    if (c.infoStale && !hasGenuineDeparture) {
+      patch.infoStale = false;
+      patch.infoStaleReason = null;
+    }
   }
 
   return Object.keys(patch).length ? (patch as Partial<Contact>) : null;
@@ -155,6 +204,6 @@ export async function reconcileAllProfiles(): Promise<number> {
 export async function markInfoReviewed(userId: string, contactId: string): Promise<void> {
   await db
     .update(contacts)
-    .set({ infoStale: false, infoStaleReason: null })
+    .set({ infoStale: false, infoStaleReason: null, companyStale: false, emailStale: false })
     .where(and(eq(contacts.id, contactId), eq(contacts.userId, userId)));
 }
