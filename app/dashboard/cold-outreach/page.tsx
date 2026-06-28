@@ -56,9 +56,22 @@ async function getProspects() {
   }
 }
 
+/** Most recent touch with this prospect (outbound, inbound, meeting, or first outreach). */
+function recencyOf(p: ColdProspect): number {
+  return Math.max(
+    p.lastOutboundAt ? new Date(p.lastOutboundAt).getTime() : 0,
+    p.lastInboundAt ? new Date(p.lastInboundAt).getTime() : 0,
+    p.meetingAt ? new Date(p.meetingAt).getTime() : 0,
+    p.firstOutreachAt ? new Date(p.firstOutreachAt).getTime() : 0,
+  );
+}
+
 export default async function ColdOutreachPage() {
   const rows = await getProspects();
-  const list = (rows ?? []).filter((p) => !isNoiseEmail(p.email));
+  // Most recently contacted first — surface the people you just emailed / messaged at the top.
+  const list = (rows ?? [])
+    .filter((p) => !isNoiseEmail(p.email))
+    .sort((a, b) => recencyOf(b) - recencyOf(a));
   const counts = list.reduce<Record<string, number>>((a, p) => {
     const s = displayStatus(p);
     a[s] = (a[s] ?? 0) + 1;

@@ -6,7 +6,15 @@ import { Search, SlidersHorizontal } from "lucide-react";
 
 const CATS = ["Coworker", "Friend", "Investor", "Other", "Vendor"];
 
-export function ContactsFilters({ enriched, vip = 0 }: { enriched: number; vip?: number }) {
+export function ContactsFilters({
+  enriched,
+  vip = 0,
+  promoted = 0,
+}: {
+  enriched: number;
+  vip?: number;
+  promoted?: number;
+}) {
   const router = useRouter();
   const params = useSearchParams();
   const pathname = usePathname();
@@ -74,6 +82,13 @@ export function ContactsFilters({ enriched, vip = 0 }: { enriched: number; vip?:
         </span>
         <span className={pill(tab === "new")} onClick={() => update("tab", "new")} title="Added in the last 7 days">
           New
+        </span>
+        <span
+          className={`flex items-center gap-1.5 ${pill(tab === "promoted")}`}
+          onClick={() => update("tab", "promoted")}
+          title="Graduated from cold outreach in the last 7 days"
+        >
+          Promoted {promoted > 0 && <span className="chip">{promoted}</span>}
         </span>
         <span className={pill(tab === "recent")} onClick={() => update("tab", "recent")} title="Interacted with in the last 7 days">
           Recent

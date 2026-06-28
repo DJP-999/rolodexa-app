@@ -1,7 +1,7 @@
 import { Suspense } from "react";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, gte, isNotNull, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { contacts, userContext } from "@/db/schema";
+import { coldProspects, contacts, userContext } from "@/db/schema";
 import { getPrimaryUser } from "@/lib/user";
 import { ContactControls } from "./ContactControls";
 import { ContactsFilters } from "./ContactsFilters";
@@ -24,6 +24,29 @@ async function getContacts() {
       .limit(5000);
   } catch {
     return null;
+  }
+}
+
+/** Contact IDs promoted out of cold outreach in the last 7 days (by promotion time). */
+async function getRecentlyPromotedIds(): Promise<Set<string>> {
+  try {
+    const u = await getPrimaryUser();
+    if (!u) return new Set();
+    const since = new Date(Date.now() - WEEK_MS);
+    const rows = await db
+      .select({ id: coldProspects.promotedContactId })
+      .from(coldProspects)
+      .where(
+        and(
+          eq(coldProspects.userId, u.id),
+          eq(coldProspects.status, "promoted"),
+          isNotNull(coldProspects.promotedContactId),
+          gte(coldProspects.updatedAt, since),
+        ),
+      );
+    return new Set(rows.map((r) => r.id).filter((x): x is string => !!x));
+  } catch {
+    return new Set();
   }
 }
 
@@ -63,9 +86,14 @@ export default async function ContactsPage({
   }>;
 }) {
   const sp = await searchParams;
-  const [all, fieldGroupings] = await Promise.all([getContacts(), getFieldGroupings()]);
+  const [all, fieldGroupings, promotedIds] = await Promise.all([
+    getContacts(),
+    getFieldGroupings(),
+    getRecentlyPromotedIds(),
+  ]);
   const enriched = all?.filter((c) => c.enrichedAt).length ?? 0;
   const vipCount = all?.filter((c) => c.highValue).length ?? 0;
+  const promotedCount = all?.filter((c) => promotedIds.has(c.id)).length ?? 0;
 
   const q = (sp.q ?? "").toLowerCase();
   const rel = sp.rel ?? "";
@@ -83,6 +111,8 @@ export default async function ContactsPage({
     if (tab === "enriched" && !c.enrichedAt) return false;
     if (tab === "needs" && c.relevance != null) return false;
     if (tab === "vip" && !c.highValue) return false;
+    // Promoted = graduated from cold outreach into the rolodex in the last 7 days.
+    if (tab === "promoted" && !promotedIds.has(c.id)) return false;
     // New = people you MET with or added manually in the last 7 days — never bulk CSV imports.
     if (
       tab === "new" &&
@@ -187,7 +217,7 @@ export default async function ContactsPage({
       )}
 
       <Suspense fallback={<div className="mt-5 h-[88px]" />}>
-        <ContactsFilters enriched={enriched} vip={vipCount} />
+        <ContactsFilters enriched={enriched} vip={vipCount} promoted={promotedCount} />
       </Suspense>
 
       {!all ? (
