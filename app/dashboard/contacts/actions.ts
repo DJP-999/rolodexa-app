@@ -249,9 +249,10 @@ export async function setHighValueAction(id: string, value: boolean) {
     .update(contacts)
     .set({ highValue: value })
     .where(and(eq(contacts.id, id), eq(contacts.userId, user.id)));
-  await runOnce("recompute"); // apply the VIP relevance floor immediately
-  revalidatePath(`/dashboard/contacts/${id}`);
-  revalidatePath("/dashboard/contacts");
+  // Apply the VIP relevance floor in the BACKGROUND, and do NOT revalidate any route — any
+  // revalidation inside a server action refreshes the CURRENT page and resets scroll. The toggle
+  // is already optimistic, so the user stays exactly where they are while batch-assigning VIPs.
+  void runOnce("recompute");
 }
 
 /**
@@ -271,8 +272,8 @@ export async function setSilencedAction(id: string, value: boolean) {
         : { outreachBlocked: false, outreachSnoozedUntil: null, outreachDismissedAt: null },
     )
     .where(and(eq(contacts.id, id), eq(contacts.userId, user.id)));
-  revalidatePath(`/dashboard/contacts/${id}`);
-  revalidatePath("/dashboard/contacts");
+  // Optimistic toggle — no revalidation (which would refresh the page and reset scroll); the user
+  // keeps their position while muting/unmuting contacts in place.
 }
 
 /**
