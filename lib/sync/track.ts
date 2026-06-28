@@ -525,6 +525,12 @@ export async function promoteColdProspect(id: string): Promise<string | null> {
       .update(interactions)
       .set({ contactId: newId.id })
       .where(and(eq(interactions.userId, p.userId), eq(interactions.coldProspectId, id)));
+    // Fire full enrichment in the background: resolve LinkedIn URL/identity, pull the full
+    // profile, backfill LinkedIn + email history, and grade fit so they rank immediately.
+    // Fire-and-forget — the long-running worker process keeps executing it after we return.
+    void import("@/lib/sync/enrichOne")
+      .then((m) => m.enrichPromotedContact(newId.id))
+      .catch((e) => console.error("[track] enrichPromotedContact", e));
     return newId.id;
   } catch (e) {
     console.error("[track] promoteColdProspect", e);

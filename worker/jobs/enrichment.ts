@@ -165,7 +165,7 @@ async function matchLinkedIn(
 }
 
 /** Normalize a Unipile profile into the compact shape the profile page renders. */
-function normalizeProfile(p: any): Record<string, unknown> {
+export function normalizeProfile(p: any): Record<string, unknown> {
   const experience = Array.isArray(p?.work_experience)
     ? p.work_experience
         .map((e: any) => ({
