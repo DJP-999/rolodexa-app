@@ -153,6 +153,7 @@ export default async function ContactsPage({
     professionalFit: c.professionalFit ?? null,
     status: c.status,
     highValue: c.highValue,
+    outreachBlocked: c.outreachBlocked ?? false,
     lastDays: days(c.lastContactedAt),
     lastContactedAt: c.lastContactedAt ? new Date(c.lastContactedAt).toISOString() : null,
     infoStale: c.infoStale ?? false,

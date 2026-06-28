@@ -141,6 +141,7 @@ function gradeSignature(): string {
 
 /** Should this contact be (re-)graded now? Only when something that affects the grade changed. */
 function needsGrade(c: Contact, sig: string): boolean {
+  if (c.gradesLocked) return false; // user hand-set fit/relevance — never auto-overwrite
   if (c.professionalFit == null) return true; // never graded
   if ((c.fitGradedModel ?? "") !== sig) return true; // grading model OR rubric changed
   if ((c.company ?? "") !== (c.fitGradedCompany ?? "")) return true; // MOVED FIRMS
@@ -265,7 +266,7 @@ export async function runFitGrade(): Promise<void> {
  */
 export async function gradeContactFit(contactId: string): Promise<void> {
   const c = (await db.select().from(contacts).where(eq(contacts.id, contactId)).limit(1))[0];
-  if (!c || c.isOrganization) return;
+  if (!c || c.isOrganization || c.gradesLocked) return; // respect a manual fit/relevance override
   const ctx = (await db.select().from(userContext).where(eq(userContext.userId, c.userId)).limit(1))[0];
   const firmMap = new Map<string, string>();
   if (c.company) {

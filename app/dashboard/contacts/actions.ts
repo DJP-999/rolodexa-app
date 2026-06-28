@@ -254,6 +254,67 @@ export async function setHighValueAction(id: string, value: boolean) {
   revalidatePath("/dashboard/contacts");
 }
 
+/**
+ * Silence a contact: mute ALL outreach nudges/notifications for them (sets outreachBlocked) —
+ * for people you're always in touch with or simply never want pinged about. Un-silencing clears
+ * the block AND any lingering snooze/dismiss so they re-enter the normal cadence.
+ */
+export async function setSilencedAction(id: string, value: boolean) {
+  if (!id) return;
+  const user = await getPrimaryUser();
+  if (!user) return;
+  await db
+    .update(contacts)
+    .set(
+      value
+        ? { outreachBlocked: true }
+        : { outreachBlocked: false, outreachSnoozedUntil: null, outreachDismissedAt: null },
+    )
+    .where(and(eq(contacts.id, id), eq(contacts.userId, user.id)));
+  revalidatePath(`/dashboard/contacts/${id}`);
+  revalidatePath("/dashboard/contacts");
+}
+
+/**
+ * Manually set a contact's Fit (0-100, stored as 0-1) and/or Relevance (0-100) and LOCK them so
+ * auto grading + recompute never overwrite the hand-set values. Pass `auto: true` to release the
+ * lock and immediately re-grade the contact from scratch.
+ */
+export async function setManualGradesAction(
+  id: string,
+  v: { fit?: number; relevance?: number; auto?: boolean },
+): Promise<{ ok: boolean }> {
+  const user = await getPrimaryUser();
+  if (!user || !id) return { ok: false };
+  const owned = (
+    await db
+      .select({ id: contacts.id })
+      .from(contacts)
+      .where(and(eq(contacts.id, id), eq(contacts.userId, user.id)))
+      .limit(1)
+  )[0];
+  if (!owned) return { ok: false };
+
+  if (v.auto) {
+    // Release the lock and re-grade from scratch.
+    await db.update(contacts).set({ gradesLocked: false }).where(eq(contacts.id, id));
+    const { gradeContactFit } = await import("@/worker/jobs/fitGrade");
+    await gradeContactFit(id);
+    revalidatePath(`/dashboard/contacts/${id}`);
+    revalidatePath("/dashboard/contacts");
+    return { ok: true };
+  }
+
+  const upd: Partial<typeof contacts.$inferInsert> = { gradesLocked: true, gradedAt: new Date() };
+  const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
+  if (typeof v.fit === "number" && isFinite(v.fit)) upd.professionalFit = clamp(v.fit, 0, 100) / 100;
+  if (typeof v.relevance === "number" && isFinite(v.relevance)) upd.relevance = Math.round(clamp(v.relevance, 0, 100));
+  await db.update(contacts).set(upd).where(eq(contacts.id, id));
+  revalidatePath(`/dashboard/contacts/${id}`);
+  revalidatePath("/dashboard/contacts");
+  return { ok: true };
+}
+
 /** Permanently delete a contact (and its cascading claims/suggestions). Scoped to the owner. */
 /** Manually edit a contact's core fields. Empty strings clear a field (except name). */
 export async function updateContactAction(

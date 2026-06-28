@@ -82,6 +82,9 @@ export const contacts = pgTable("contacts", {
   outreachBlocked: boolean("outreach_blocked").default(false),
   outreachDismissedAt: timestamp("outreach_dismissed_at", { withTimezone: true }),
   outreachSnoozedUntil: timestamp("outreach_snoozed_until", { withTimezone: true }),
+  // Manual override: when true, the user has hand-set fit/relevance and auto grading + recompute
+  // must NOT overwrite them until they switch the contact back to Auto.
+  gradesLocked: boolean("grades_locked").default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 }, (t) => ({ userIdx: index("contacts_user_idx").on(t.userId), emailIdx: index("contacts_email_idx").on(t.userId, t.email), relevanceIdx: index("contacts_relevance_idx").on(t.userId, t.relevance) }));
 // PitchBook export reference data — FIRMS/investors. Deliberately a SEPARATE table from

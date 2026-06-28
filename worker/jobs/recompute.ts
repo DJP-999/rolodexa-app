@@ -163,7 +163,8 @@ export async function runRecompute(): Promise<void> {
                   : 0;
     const isVip = prof.priority || c.highValue || false;
     const vipFloor = isVip ? 70 : 0;
-    const finalRelevance = Math.max(relevance, fitFloor, vipFloor);
+    // A manually-graded contact keeps the user's hand-set relevance — never recomputed.
+    const finalRelevance = c.gradesLocked ? (c.relevance ?? 0) : Math.max(relevance, fitFloor, vipFloor);
 
     await db
       .update(contacts)

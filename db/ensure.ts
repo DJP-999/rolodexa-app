@@ -160,5 +160,7 @@ export async function ensureSchema(sql: {
   await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "outreach_blocked" boolean DEFAULT false`);
   await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "outreach_dismissed_at" timestamptz`);
   await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "outreach_snoozed_until" timestamptz`);
+  // Manual fit/relevance override lock.
+  await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "grades_locked" boolean DEFAULT false`);
   console.log("[db] ensureSchema applied.");
 }

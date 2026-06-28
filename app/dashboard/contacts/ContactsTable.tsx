@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ChevronDown, ArrowRight, Loader2, SlidersHorizontal, Pencil, Info } from "lucide-react";
 import DeleteContactButton from "./DeleteContactButton";
 import VipToggle from "./VipToggle";
+import SilenceToggle from "./SilenceToggle";
 import ReconnectButton from "./ReconnectButton";
 
 export type Row = {
@@ -21,6 +22,7 @@ export type Row = {
   professionalFit: number | null;
   status: string | null;
   highValue: boolean | null;
+  outreachBlocked?: boolean | null;
   lastDays: string;
   lastContactedAt: string | null;
   infoStale?: boolean;
@@ -102,7 +104,17 @@ function parseMaybeDate(s: string): number | null {
   return isNaN(t) ? null : t;
 }
 
-function Summary({ d, id, highValue }: { d: any; id: string; highValue: boolean }) {
+function Summary({
+  d,
+  id,
+  highValue,
+  silenced,
+}: {
+  d: any;
+  id: string;
+  highValue: boolean;
+  silenced: boolean;
+}) {
   const s = d.stats ?? {};
   const li = s.lastInteraction;
   return (
@@ -149,6 +161,7 @@ function Summary({ d, id, highValue }: { d: any; id: string; highValue: boolean 
           View full profile <ArrowRight className="h-3.5 w-3.5" />
         </Link>
         <div className="flex items-center gap-2">
+          <SilenceToggle id={id} initial={silenced} />
           <VipToggle id={id} initial={highValue} />
           <DeleteContactButton id={id} name={d.name ?? "this contact"} />
         </div>
@@ -746,7 +759,7 @@ export function ContactsTable({
                             <Loader2 className="h-4 w-4 animate-spin" /> Loading…
                           </span>
                         ) : d?.ok ? (
-                          <Summary d={d} id={r.id} highValue={!!r.highValue} />
+                          <Summary d={d} id={r.id} highValue={!!r.highValue} silenced={!!r.outreachBlocked} />
                         ) : (
                           <span className="text-sm text-muted">No details available.</span>
                         )}

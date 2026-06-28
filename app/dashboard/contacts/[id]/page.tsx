@@ -4,6 +4,7 @@ import { ArrowLeft, Mail, MapPin, ExternalLink, Briefcase, Newspaper, Activity, 
 import { getContactProfile } from "@/lib/contactProfile";
 import DeleteContactButton from "../DeleteContactButton";
 import VipToggle from "../VipToggle";
+import GradeEditor from "../GradeEditor";
 import ContactEditForm from "./ContactEditForm";
 import MarkReviewedButton from "./MarkReviewedButton";
 
@@ -493,6 +494,12 @@ export default async function ContactProfile({ params }: { params: Promise<{ id:
           {c.highValue && <span className="text-amber-600">Flagged high-value</span>}
           {c.gradedAt && <span>Graded {fmtDate(c.gradedAt)}</span>}
         </div>
+        <GradeEditor
+          id={c.id}
+          fit={Math.round((c.professionalFit ?? 0) * 100)}
+          relevance={c.relevance ?? 0}
+          locked={!!c.gradesLocked}
+        />
       </div>
 
       {/* Details */}
