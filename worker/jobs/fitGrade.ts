@@ -1,6 +1,6 @@
-import { eq } from "drizzle-orm";
+import { and, desc, eq, isNotNull } from "drizzle-orm";
 import { db } from "@/db";
-import { contacts, userContext } from "@/db/schema";
+import { contacts, interactions, userContext } from "@/db/schema";
 import { env } from "@/lib/env";
 import { researchFirm, researchFirms, firmKey } from "@/lib/research/firm";
 import { reconcileAllProfiles } from "@/lib/sync/profileReconcile";
@@ -15,8 +15,53 @@ const NOTES_KEY = /note|background|summary|description|comment/i;
 
 type Contact = typeof contacts.$inferSelect;
 
+/**
+ * Recent email/LinkedIn thread topics per contact — first-hand evidence of what each contact
+ * actually transacts with the user. A live deal thread ("Re: Discounted Lambda Cap Table
+ * Transfer") proves an on-thesis counterparty even when their LinkedIn bio looks off-thesis.
+ */
+async function threadsByContact(
+  userId: string,
+  onlyContactId?: string,
+  perContact = 6,
+): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>();
+  try {
+    const where = onlyContactId
+      ? and(eq(interactions.userId, userId), eq(interactions.contactId, onlyContactId))
+      : and(eq(interactions.userId, userId), isNotNull(interactions.contactId));
+    const rows = await db
+      .select({
+        contactId: interactions.contactId,
+        channel: interactions.channel,
+        direction: interactions.direction,
+        metadata: interactions.metadata,
+      })
+      .from(interactions)
+      .where(where)
+      .orderBy(desc(interactions.occurredAt))
+      .limit(onlyContactId ? 50 : 30000);
+    for (const r of rows) {
+      const cid = r.contactId;
+      if (!cid) continue;
+      const arr = out.get(cid) ?? [];
+      if (arr.length >= perContact) continue; // keep the most recent N (rows are newest-first)
+      const m = (r.metadata ?? {}) as { subject?: string; text?: string };
+      const topic = (m.subject || m.text || "").toString().replace(/\s+/g, " ").trim();
+      if (!topic) continue;
+      const chan = r.channel === "linkedin" ? "LinkedIn" : r.channel === "nylas_email" ? "Email" : r.channel ?? "msg";
+      const dir = r.direction === "outbound" ? "you→them" : "them→you";
+      arr.push(`${chan} (${dir}): ${topic.slice(0, 120)}`);
+      out.set(cid, arr);
+    }
+  } catch (e) {
+    console.error("[fit-grade] threadsByContact", e);
+  }
+  return out;
+}
+
 /** Build the LLM fit input from a contact row — includes meeting-note intel and firm research. */
-function buildFitInput(c: Contact, firmMap?: Map<string, string>): FitInput {
+function buildFitInput(c: Contact, firmMap?: Map<string, string>, threads?: Map<string, string[]>): FitInput {
   const cf = (c.customFields ?? {}) as Record<string, string>;
   const nf = (c.normalizedFields ?? {}) as Record<string, string>;
   const notesKey = Object.keys(cf).find((k) => NOTES_KEY.test(k));
@@ -49,6 +94,7 @@ function buildFitInput(c: Contact, firmMap?: Map<string, string>): FitInput {
     },
     pitchbook: (c.pitchbookData ?? null) as Record<string, string> | null,
     firmResearch: c.company && firmMap ? firmMap.get(firmKey(c.company)) ?? null : null,
+    recentThreads: threads?.get(c.id) ?? null,
     profile: pd ? { headline: pd.headline, about: pd.about, experience: pd.experience, skills: pd.skills } : null,
   };
 }
@@ -84,7 +130,7 @@ async function gradeWithRetry(inputs: FitInput[], focus: UserFocus) {
 
 // Bump when the grading rubric changes so every contact re-grades exactly once. Combined with
 // the strong-model id, this signature lets us detect both a model switch and a prompt change.
-const GRADE_PROMPT_VERSION = "v4";
+const GRADE_PROMPT_VERSION = "v5";
 function gradeSignature(): string {
   const model =
     env.LLM_STRONG_PROVIDER === "openrouter"
@@ -179,6 +225,8 @@ export async function runFitGrade(): Promise<void> {
   let graded = 0;
   for (const [userId, list] of byUser) {
     const focus = focusFor(ctxByUser.get(userId));
+    // First-hand deal evidence: the recent threads this user has with each contact.
+    const threads = await threadsByContact(userId);
     // Research this user's firms cache-first (capped), investors/high-value first so the budget
     // lands on the contacts that matter most. Cache persists, so coverage converges across runs.
     const firmOrder = [...list].sort((a, b) => firmPriority(b) - firmPriority(a));
@@ -194,7 +242,7 @@ export async function runFitGrade(): Promise<void> {
       const slice = list.slice(i, i + roundSize);
       const batches: Contact[][] = [];
       for (let j = 0; j < slice.length; j += BATCH) batches.push(slice.slice(j, j + BATCH));
-      const results = await Promise.all(batches.map((b) => gradeWithRetry(b.map((c) => buildFitInput(c, firmMap)), focus)));
+      const results = await Promise.all(batches.map((b) => gradeWithRetry(b.map((c) => buildFitInput(c, firmMap, threads)), focus)));
       const companyById = new Map(slice.map((c) => [c.id, c.company]));
       const updates = results
         .flat()
@@ -224,7 +272,8 @@ export async function gradeContactFit(contactId: string): Promise<void> {
     const s = await researchFirm(c.company);
     if (s) firmMap.set(firmKey(c.company), s);
   }
-  const results = await gradeWithRetry([buildFitInput(c, firmMap)], focusFor(ctx));
+  const threads = await threadsByContact(c.userId, c.id);
+  const results = await gradeWithRetry([buildFitInput(c, firmMap, threads)], focusFor(ctx));
   const r = results[0];
   if (r) {
     await persist([{ id: c.id, fit: r.fit, summary: r.summary, rationale: r.rationale, company: c.company }]);

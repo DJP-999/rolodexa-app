@@ -108,6 +108,21 @@ let started = false;
 export async function startScheduler(): Promise<void> {
   if (started) return;
   started = true;
+
+  // A deploy/restart kills any in-flight job mid-run, leaving its job_runs row stuck on
+  // "running" forever — which makes the UI show a phantom job and masks real completions.
+  // On startup, close out any such orphans so the activity feed reflects reality.
+  try {
+    const orphaned = await db
+      .update(jobRuns)
+      .set({ status: "failed", finishedAt: new Date(), detail: { error: "interrupted by restart" } })
+      .where(eq(jobRuns.status, "running"))
+      .returning({ id: jobRuns.id });
+    if (orphaned.length) console.log(`[scheduler] cleared ${orphaned.length} orphaned running job(s).`);
+  } catch (e) {
+    console.error("[scheduler] orphan cleanup failed", e);
+  }
+
   try {
     const c = getConnection();
     if (!c) {
