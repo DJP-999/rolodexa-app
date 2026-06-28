@@ -64,7 +64,12 @@ function firmPriority(c: Contact): number {
 }
 
 function focusFor(ctx: typeof userContext.$inferSelect | undefined): UserFocus {
-  return { role: ctx?.role ?? null, currentFocus: ctx?.currentFocus ?? null, activeProjects: ctx?.activeProjects ?? null };
+  return {
+    role: ctx?.role ?? null,
+    currentFocus: ctx?.currentFocus ?? null,
+    activeProjects: ctx?.activeProjects ?? null,
+    priorityConnections: ctx?.priorityConnections ?? null,
+  };
 }
 
 /** Grade one batch with a single retry, so a transient LLM error doesn't drop it. */
@@ -78,7 +83,7 @@ async function gradeWithRetry(inputs: FitInput[], focus: UserFocus) {
 
 // Bump when the grading rubric changes so every contact re-grades exactly once. Combined with
 // the strong-model id, this signature lets us detect both a model switch and a prompt change.
-const GRADE_PROMPT_VERSION = "v3";
+const GRADE_PROMPT_VERSION = "v4";
 function gradeSignature(): string {
   const model =
     env.LLM_STRONG_PROVIDER === "openrouter"
