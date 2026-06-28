@@ -1,5 +1,6 @@
-import { sql } from "drizzle-orm";
+import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { db } from "@/db";
+import { contacts, interactions } from "@/db/schema";
 
 const TZ = "America/New_York";
 const DAYS = 30;
@@ -82,4 +83,61 @@ export async function getKpis(userId: string): Promise<Kpi[]> {
     tableKpi("calendar_events", userId, "meetingsHeld", "Meetings held", sql`held = true`, "start_at"),
   ]);
   return [contactsAdded, emailIx, linkedinIx, replies, meetingsSet, meetingsHeld];
+}
+
+export type Comm = {
+  id: string;
+  occurredAt: string;
+  channel: string;
+  direction: string;
+  eventType: string;
+  contactId: string;
+  contactName: string;
+  company: string | null;
+  snippet: string | null;
+};
+
+/**
+ * Every logged communication with a real rolodex contact in the last `days` days (newest first):
+ * emails, LinkedIn DMs, and meetings, both directions. Only rows tied to an actual contact.
+ */
+export async function getRecentCommunications(userId: string, days = 7): Promise<Comm[]> {
+  const since = new Date(Date.now() - days * 86_400_000);
+  try {
+    const rows = await db
+      .select({
+        id: interactions.id,
+        occurredAt: interactions.occurredAt,
+        channel: interactions.channel,
+        direction: interactions.direction,
+        eventType: interactions.eventType,
+        metadata: interactions.metadata,
+        contactId: contacts.id,
+        name: contacts.name,
+        company: contacts.company,
+      })
+      .from(interactions)
+      .innerJoin(contacts, eq(interactions.contactId, contacts.id))
+      .where(and(eq(interactions.userId, userId), gte(interactions.occurredAt, since)))
+      .orderBy(desc(interactions.occurredAt))
+      .limit(400);
+    return rows.map((r) => {
+      const m = (r.metadata ?? {}) as { subject?: string; text?: string };
+      const snippet = (typeof m.subject === "string" && m.subject) || (typeof m.text === "string" && m.text) || null;
+      return {
+        id: r.id,
+        occurredAt: new Date(r.occurredAt as unknown as string).toISOString(),
+        channel: r.channel ?? "",
+        direction: r.direction ?? "",
+        eventType: r.eventType,
+        contactId: r.contactId,
+        contactName: r.name,
+        company: r.company,
+        snippet: snippet ? snippet.slice(0, 140) : null,
+      };
+    });
+  } catch (err) {
+    console.error("[kpi] recent communications failed", err);
+    return [];
+  }
 }
