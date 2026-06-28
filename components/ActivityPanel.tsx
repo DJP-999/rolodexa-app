@@ -15,15 +15,26 @@ type Progress = {
   fitPct: number;
   categorizedPct: number;
 };
+type JobProgress = { phase: string | null; processed: number; total: number; pct: number; etaMs: number } | null;
 type Data = {
   progress: Progress;
   recent: { gradedLast5m: number; enrichedLast5m: number };
   running: boolean;
-  current: { name: string; startedAt: string | null } | null;
+  current: { name: string; startedAt: string | null; progress?: JobProgress } | null;
   runs: Run[];
   jobChanges: { value: string; at: string | null }[];
   pendingSuggestions: number;
 };
+
+function fmtEta(ms: number): string {
+  if (!ms || ms <= 0) return "";
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `~${s}s left`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return s % 60 ? `~${m}m ${s % 60}s left` : `~${m}m left`;
+  const h = Math.floor(m / 60);
+  return `~${h}h ${m % 60}m left`;
+}
 
 const PRETTY: Record<string, string> = {
   enrichment: "Enriching your network",
@@ -114,14 +125,34 @@ export function ActivityPanel() {
       <div className="mt-4 rounded-2xl border border-hairline bg-white p-5">
         {/* Currently running job + live throughput */}
         {running && current ? (
-          <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-[#2d6cf6]/20 bg-[#2d6cf6]/[0.04] px-3 py-2 text-sm">
-            <Loader2 className="h-4 w-4 animate-spin text-[#2d6cf6]" />
-            <span className="font-medium text-ink">{pretty(current.name)}</span>
-            <span className="text-muted">· running {elapsed(current.startedAt)}</span>
-            {throughput > 0 && (
-              <span className="ml-auto flex items-center gap-1 text-xs text-[#2d6cf6]">
-                <Zap className="h-3.5 w-3.5" /> {throughput} contacts in the last 5 min
-              </span>
+          <div className="mb-4 rounded-xl border border-[#2d6cf6]/20 bg-[#2d6cf6]/[0.04] px-3 py-2 text-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin text-[#2d6cf6]" />
+              <span className="font-medium text-ink">{pretty(current.name)}</span>
+              {current.progress?.phase && <span className="text-muted">· {current.progress.phase}</span>}
+              <span className="text-muted">· running {elapsed(current.startedAt)}</span>
+              {throughput > 0 && (
+                <span className="ml-auto flex items-center gap-1 text-xs text-[#2d6cf6]">
+                  <Zap className="h-3.5 w-3.5" /> {throughput} contacts in the last 5 min
+                </span>
+              )}
+            </div>
+            {current.progress && current.progress.total > 0 && (
+              <div className="mt-2">
+                <div className="flex items-center justify-between text-xs text-muted">
+                  <span>
+                    {current.progress.processed.toLocaleString()} / {current.progress.total.toLocaleString()} ·{" "}
+                    {current.progress.pct}%
+                  </span>
+                  {current.progress.etaMs > 0 && <span>{fmtEta(current.progress.etaMs)}</span>}
+                </div>
+                <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-black/[0.06]">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-[#4f6ef7] to-[#5a39ef] transition-[width] duration-500"
+                    style={{ width: `${current.progress.pct}%` }}
+                  />
+                </div>
+              </div>
             )}
           </div>
         ) : (

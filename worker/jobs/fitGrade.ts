@@ -5,6 +5,7 @@ import { env } from "@/lib/env";
 import { researchFirm, researchFirms, firmKey } from "@/lib/research/firm";
 import { reconcileAllProfiles } from "@/lib/sync/profileReconcile";
 import { gradeFitBatch, type FitInput, type UserFocus } from "@/lib/scoring/fit";
+import { reportPhase, reportProgress } from "@/lib/jobs/progress";
 import { runRecompute } from "./recompute";
 
 const BATCH = 6; // contacts per LLM call
@@ -153,6 +154,7 @@ export async function runFitGrade(): Promise<void> {
   // First reconcile LinkedIn → CRM (pick the focus-relevant current role, auto-apply job moves,
   // flag stale notes). A contact whose firm just changed will then be detected below as needing
   // a re-grade, with fresh firm research for the new firm.
+  await reportPhase("Reconciling profiles");
   await reconcileAllProfiles();
 
   const us = await db.select().from(userContext);
@@ -173,6 +175,7 @@ export async function runFitGrade(): Promise<void> {
   const byUser = new Map<string, Contact[]>();
   for (const c of people) (byUser.get(c.userId) ?? byUser.set(c.userId, []).get(c.userId)!).push(c);
 
+  const totalToGrade = people.length;
   let graded = 0;
   for (const [userId, list] of byUser) {
     const focus = focusFor(ctxByUser.get(userId));
@@ -180,7 +183,11 @@ export async function runFitGrade(): Promise<void> {
     // lands on the contacts that matter most. Cache persists, so coverage converges across runs.
     const firmOrder = [...list].sort((a, b) => firmPriority(b) - firmPriority(a));
     const companies = firmOrder.map((c) => c.company).filter((x): x is string => !!x);
-    const firmMap = await researchFirms(companies, env.FIRM_RESEARCH_CAP);
+    // Surface the firm-research preamble as its own live phase — it's the long pole on a first
+    // full re-grade, so without this the bar would sit at 0% for minutes with no explanation.
+    const firmMap = await researchFirms(companies, env.FIRM_RESEARCH_CAP, (d, t) =>
+      void reportProgress(d, t, "Researching firms"),
+    );
     console.log(`[fit-grade] ${firmMap.size} firm brief(s) available (user ${userId})`);
     const roundSize = BATCH * CONCURRENCY;
     for (let i = 0; i < list.length; i += roundSize) {
@@ -194,10 +201,12 @@ export async function runFitGrade(): Promise<void> {
         .map((r) => ({ id: r.id, fit: r.fit, summary: r.summary, rationale: r.rationale, company: companyById.get(r.id) ?? null }));
       await persist(updates); // commit each round so progress survives an interruption
       graded += updates.length;
+      await reportProgress(graded, totalToGrade, "Grading contacts");
     }
   }
 
   console.log(`[fit-grade] scored ${graded} contact(s)`);
+  await reportPhase("Recomputing relevance");
   await runRecompute();
 }
 

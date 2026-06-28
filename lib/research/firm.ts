@@ -79,7 +79,11 @@ export async function researchFirm(name: string): Promise<string | null> {
  * free; only up to `cap` uncached firms are researched this run (the rest converge on later
  * runs as the cache fills). Returns a map of normalized-key → brief for everything available.
  */
-export async function researchFirms(names: string[], cap: number): Promise<Map<string, string>> {
+export async function researchFirms(
+  names: string[],
+  cap: number,
+  onProgress?: (done: number, total: number) => void,
+): Promise<Map<string, string>> {
   const out = new Map<string, string>();
   const wanted = new Map<string, string>(); // key → a display name
   for (const n of names) {
@@ -115,13 +119,18 @@ export async function researchFirms(names: string[], cap: number): Promise<Map<s
 
   // Research the queue with a small worker pool (bounded so Exa isn't hammered).
   const CONCURRENCY = 4;
+  const total = toResearch.length;
   let cursor = 0;
+  let done = 0;
+  if (total > 0) onProgress?.(0, total);
   await Promise.all(
-    Array.from({ length: Math.min(CONCURRENCY, toResearch.length) }, async () => {
+    Array.from({ length: Math.min(CONCURRENCY, total) }, async () => {
       while (cursor < toResearch.length) {
         const item = toResearch[cursor++];
         const s = await researchFirm(item.name);
         if (s) out.set(item.k, s);
+        done++;
+        if (total > 0) onProgress?.(done, total);
       }
     }),
   );

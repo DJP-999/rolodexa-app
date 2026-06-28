@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { jobRuns, automations } from "@/db/schema";
 import { env } from "@/lib/env";
+import { runWithProgress } from "@/lib/jobs/progress";
 import { runEmailPoll } from "./jobs/emailPoll";
 import { runLinkedinPoll } from "./jobs/linkedinPoll";
 import { runMeetingsSync } from "./jobs/meetingsSync";
@@ -69,7 +70,8 @@ async function recordRun(name: string, fn: () => Promise<void>): Promise<void> {
     console.error("[scheduler] jobRuns insert failed", e);
   }
   try {
-    await fn();
+    // Bind a progress context to this run row so the job can report live %/ETA into detail.
+    await runWithProgress(id, fn);
     if (id)
       await db
         .update(jobRuns)

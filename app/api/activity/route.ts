@@ -61,7 +61,17 @@ export async function GET() {
       },
       recent: { gradedLast5m, enrichedLast5m },
       running: !!current,
-      current: current ? { name: current.name, startedAt: current.startedAt } : null,
+      current: current
+        ? {
+            name: current.name,
+            startedAt: current.startedAt,
+            // Live per-job progress written by the job into its run row (processed/total/pct/etaMs/phase).
+            progress:
+              current.detail && typeof current.detail === "object" && "total" in current.detail
+                ? (current.detail as Record<string, unknown>)
+                : null,
+          }
+        : null,
       runs: runs.map((r) => ({
         name: r.name,
         status: r.status,
