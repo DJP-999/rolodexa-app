@@ -6,11 +6,28 @@ import { env, isConfigured } from "@/lib/env";
  */
 export type ApprovalButton = { label: string; data: string };
 
+/** Escape text for Telegram HTML parse mode (only &, <, > are special). */
+export function htmlEscape(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/**
+ * Render a contact's name as an HTML link to their LinkedIn (so the user can one-tap the name in
+ * a nudge to vet them before reaching out). Falls back to bold plain text when no URL is known.
+ * Use ONLY with `{ html: true }`.
+ */
+export function contactLink(name: string, linkedinUrl?: string | null): string {
+  const n = htmlEscape(name || "Contact");
+  return linkedinUrl && /^https?:\/\//i.test(linkedinUrl)
+    ? `<a href="${htmlEscape(linkedinUrl)}">${n}</a>`
+    : `<b>${n}</b>`;
+}
+
 export async function sendMessage(
   chatId: string,
   text: string,
   buttons?: ApprovalButton[],
-  opts?: { plain?: boolean },
+  opts?: { plain?: boolean; html?: boolean },
 ): Promise<boolean> {
   if (!isConfigured("telegram")) {
     console.warn(`[telegram] not configured — would send to ${chatId}:\n${text}`);
@@ -30,8 +47,13 @@ export async function sendMessage(
       body: JSON.stringify({
         chat_id: chatId,
         text: bubbles[i],
-        // Plain mode avoids "can't parse entities" failures on free-form draft text.
-        ...(opts?.plain ? {} : { parse_mode: "Markdown" }),
+        // Plain mode avoids "can't parse entities" failures on free-form draft text; HTML mode is
+        // used for cards with linked contact names (escape dynamic text with htmlEscape first).
+        ...(opts?.plain
+          ? {}
+          : opts?.html
+            ? { parse_mode: "HTML", disable_web_page_preview: true }
+            : { parse_mode: "Markdown" }),
         reply_markup: isLast ? keyboard : undefined,
       }),
     });

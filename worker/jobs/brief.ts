@@ -14,7 +14,7 @@ import {
   deriveSuppressedCategories,
   type GateContext,
 } from "@/lib/notifications/gate";
-import { sendMessage } from "@/lib/integrations/telegram";
+import { sendMessage, contactLink, htmlEscape } from "@/lib/integrations/telegram";
 import { CONTACT_BUTTONS } from "@/lib/agent/telegram";
 import { outreachSuppressed, isNewsTrigger } from "@/lib/outreach/suppress";
 import { cadenceForRelevance } from "@/lib/scoring/relevance";
@@ -74,11 +74,12 @@ async function sendColdDigest(userId: string, email: string, slug: string): Prom
   for (const { c, last } of cold) {
     const meta = [c.role, c.company].filter(Boolean).join(" · ");
     const when = last === null ? "no touch on record" : `last touch ${last}d ago`;
+    const name = contactLink(c.name, c.linkedinUrl); // tap the name to vet them on LinkedIn
     await sendMessage(
       tg.externalId,
-      `${c.name}${meta ? ` — ${meta}` : ""}\n${when} · relevance ${c.relevance ?? "—"}`,
+      `${name}${meta ? ` — ${htmlEscape(meta)}` : ""}\n${htmlEscape(when)} · relevance ${c.relevance ?? "—"}`,
       CONTACT_BUTTONS(c.id),
-      { plain: true },
+      { html: true },
     );
   }
   console.log(`[brief:${slug}] sent actionable cold digest (${cold.length}) to ${email}`);
@@ -209,7 +210,9 @@ export async function runBrief(slug: string): Promise<void> {
       const meta = [c?.role, c?.company].filter(Boolean).join(" · ");
       // First stage: the update + four controls. The draft + channel are only revealed once you
       // tap Reach out, so the brief stays a quick triage rather than a wall of pre-written notes.
-      const itemText = `${c?.name ?? "Contact"}${meta ? ` — ${meta}` : ""}\n${s.reason}${srcLine}`;
+      // The name links to LinkedIn so the user can vet the contact before deciding to reach out.
+      const name = contactLink(c?.name ?? "Contact", c?.linkedinUrl);
+      const itemText = `${name}${meta ? ` — ${htmlEscape(meta)}` : ""}\n${htmlEscape(s.reason)}${htmlEscape(srcLine)}`;
       const ok = await sendMessage(
         tg.externalId,
         itemText,
@@ -219,7 +222,7 @@ export async function runBrief(slug: string): Promise<void> {
           { label: "✕ Dismiss", data: `dismiss:${s.id}` },
           { label: "🚫 Block", data: `block:${s.id}` },
         ],
-        { plain: true },
+        { html: true },
       );
       if (ok) {
         sent++;
