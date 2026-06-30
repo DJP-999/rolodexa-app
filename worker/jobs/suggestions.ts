@@ -8,8 +8,62 @@ import { mentionsContact } from "@/lib/match/entity";
 import { complete } from "@/lib/llm";
 import { TONE_GUIDE, stripEmDashes } from "@/lib/agent/tone";
 import { getWritingStyleFor } from "@/lib/agent/style";
+import { matchSportsMoment } from "@/lib/personal/sportsEvents";
 
-const TRIGGER_WEIGHT = { re_engage: 0.6, job_change: 0.9, milestone: 0.8 } as const;
+// Genuine, well-timed REASONS rank highest; the bare "it's been a while" timer is demoted to a
+// last resort (0.35) so it only surfaces when nothing better exists — and even then it carries a
+// personal hook (school / city / interest) so it never reads as a cold "we should catch up".
+const TRIGGER_WEIGHT = {
+  re_engage: 0.35,
+  job_change: 0.9,
+  milestone: 0.8,
+  work_anniversary: 0.82,
+  birthday: 0.88,
+  personal_event: 0.8,
+} as const;
+
+/** Days until the next yearly occurrence of an "MM-DD" or ISO date (0 = today). */
+function daysUntilAnnual(s?: string | null): number | null {
+  const t = (s ?? "").trim();
+  const m = t.match(/(\d{1,2})-(\d{1,2})$/) ?? t.match(/^\d{4}-(\d{1,2})-(\d{1,2})/);
+  if (!m) return null;
+  const mo = Number(m[1]);
+  const day = Number(m[2]);
+  if (!mo || !day || mo > 12 || day > 31) return null;
+  const now = new Date();
+  let next = new Date(now.getFullYear(), mo - 1, day);
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (next.getTime() < today.getTime()) next = new Date(now.getFullYear() + 1, mo - 1, day);
+  return Math.round((next.getTime() - today.getTime()) / 86_400_000);
+}
+
+/** Whole years between an ISO date and today (for "N-year anniversary"). */
+function yearsSince(iso?: string | null): number {
+  const d = iso ? new Date(iso) : null;
+  if (!d || isNaN(d.getTime())) return 0;
+  return Math.floor((Date.now() - d.getTime()) / (365.25 * 86_400_000));
+}
+
+type PProfile = {
+  schools?: string[];
+  currentCity?: string | null;
+  hometown?: string | null;
+  roleStartDate?: string | null;
+  birthday?: string | null;
+  interests?: string[];
+};
+
+/** Short, factual "what I know about them personally" string the draft MAY weave in (never invent). */
+function personalContextOf(c: { personalProfile?: unknown; location?: string | null }): string | null {
+  const p = (c.personalProfile ?? null) as PProfile | null;
+  if (!p) return null;
+  const bits: string[] = [];
+  if (p.schools?.length) bits.push(`Studied at ${p.schools.slice(0, 2).join(", ")}`);
+  const city = p.hometown || p.currentCity || c.location || null;
+  if (city) bits.push(`Based in ${city}`);
+  if (p.interests?.length) bits.push(`Into ${p.interests.slice(0, 3).join(", ")}`);
+  return bits.length ? bits.join(". ") : null;
+}
 
 /**
  * Proactively open never-messaged but high-relevance imports with a first, no-agenda
@@ -33,6 +87,7 @@ async function draft(opts: {
   focus?: string | null;
   style?: string | null;
   fact?: string;
+  personalContext?: string | null;
 }): Promise<string> {
   const msg = await complete({
     tier: "strong",
@@ -49,6 +104,9 @@ async function draft(opts: {
         content:
           `Recipient: ${opts.name}\nReason: ${opts.trigger}` +
           (opts.fact ? `\nConcrete detail: ${opts.fact}` : "") +
+          (opts.personalContext
+            ? `\nKnown personal details about them — you MAY weave ONE in naturally to make it warm and specific (only if it fits; never force it, never invent beyond this): ${opts.personalContext}`
+            : "") +
           (opts.focus ? `\nMy current focus (context only, do NOT bring it up or use it as the reason to reach out): ${opts.focus}` : ""),
       },
     ],
@@ -173,7 +231,7 @@ async function alreadyPending(userId: string, contactId: string, trigger: string
       and(
         eq(suggestions.userId, userId),
         eq(suggestions.contactId, contactId),
-        eq(suggestions.triggerType, trigger as "re_engage" | "job_change" | "milestone"),
+        eq(suggestions.triggerType, trigger as typeof suggestions.$inferInsert["triggerType"]),
         eq(suggestions.status, "pending"),
       ),
     )
@@ -242,10 +300,118 @@ export async function runSuggestions(): Promise<void> {
     const lastDays = c.lastContactedAt
       ? Math.floor((Date.now() - new Date(c.lastContactedAt).getTime()) / 86_400_000)
       : null;
+    const pp = (c.personalProfile ?? null) as PProfile | null;
+    const personalCtx = personalContextOf(c);
 
-    // --- Rekindle: keep a real relationship warm, OR open a high-relevance import we've
-    // never messaged. lastContactedAt comes only from SYNCED two-way comms, so plenty of
-    // genuine contacts have none — those still deserve a first, no-agenda hello. ---
+    // --- Personal moments: genuine, well-timed reasons that keep you top of mind without ever
+    // asking for anything. These are the heart of the product, so they're event-gated (block /
+    // snooze only) and outrank the generic timer. ---
+
+    // Birthday — fire the day of / day before.
+    const bdayIn = daysUntilAnnual(pp?.birthday);
+    if (
+      bdayIn !== null &&
+      bdayIn <= 1 &&
+      !outreachSuppressed(c, true).suppressed &&
+      !(await alreadyPending(c.userId, c.id, "birthday"))
+    ) {
+      const score = Math.min(1, ((c.relevance ?? 40) / 100) * TRIGGER_WEIGHT.birthday + 0.25);
+      const message = await draft({
+        name: c.name,
+        trigger:
+          bdayIn === 0
+            ? "It's their BIRTHDAY today. Send a short, warm, genuine happy-birthday text (no agenda, no business)."
+            : "Their birthday is tomorrow. Send a short, warm happy-early-birthday text (no agenda).",
+        personalContext: personalCtx,
+        style: cx.style,
+      });
+      await db.insert(suggestions).values({
+        userId: c.userId,
+        contactId: c.id,
+        triggerType: "birthday",
+        reason: bdayIn === 0 ? `🎂 ${c.name}'s birthday is today.` : `🎂 ${c.name}'s birthday is tomorrow.`,
+        draftMessage: message,
+        intentLabel: "Wish them happy birthday",
+        priority: priorityOf(score),
+        score,
+        claimIds: [],
+      });
+      created++;
+    }
+
+    // Work anniversary — N years at their current firm (from LinkedIn role start).
+    const annivIn = daysUntilAnnual(pp?.roleStartDate);
+    const annivYears = yearsSince(pp?.roleStartDate);
+    if (
+      annivIn !== null &&
+      annivIn <= 1 &&
+      annivYears >= 1 &&
+      c.company &&
+      !outreachSuppressed(c, true).suppressed &&
+      !(await alreadyPending(c.userId, c.id, "work_anniversary"))
+    ) {
+      const score = Math.min(1, ((c.relevance ?? 40) / 100) * TRIGGER_WEIGHT.work_anniversary + 0.2);
+      const message = await draft({
+        name: c.name,
+        trigger: `They're hitting their ${annivYears}-year work anniversary at ${c.company}${
+          annivIn === 1 ? " tomorrow" : ""
+        }. Send a short, warm note acknowledging the milestone (no agenda).`,
+        personalContext: personalCtx,
+        style: cx.style,
+      });
+      await db.insert(suggestions).values({
+        userId: c.userId,
+        contactId: c.id,
+        triggerType: "work_anniversary",
+        reason: `🎉 ${c.name} is hitting ${annivYears} years at ${c.company}.`,
+        draftMessage: message,
+        intentLabel: "Acknowledge their work anniversary",
+        priority: priorityOf(score),
+        score,
+        claimIds: [],
+      });
+      created++;
+    }
+
+    // Sports moment — alma mater in the tournament, or their city's team in the playoffs. The
+    // angle matters: their HOMETOWN team is true allegiance; their CURRENT-city team is the
+    // playful "are you converting?" angle (they may root for somewhere they grew up).
+    const sports = pp ? matchSportsMoment(pp) : null;
+    if (
+      sports &&
+      !outreachSuppressed(c, true).suppressed &&
+      !(await alreadyPending(c.userId, c.id, "personal_event"))
+    ) {
+      const { event, angle, subject, city } = sports;
+      const trigger =
+        angle === "alma_mater"
+          ? `Their alma mater ${subject} is in ${event.blurb} right now. Send a short, playful catch-up text rooting for their team, then a casual "let's catch up soon" — no business ask.`
+          : angle === "hometown_team"
+            ? `Their hometown team the ${subject} are in ${event.blurb} — they grew up rooting for them. Short, warm, excited catch-up about the run, then "let's catch up soon".`
+            : `The ${subject} (${event.blurb}) are the talk of ${city ?? "their city"}, where they live now, but they're originally from elsewhere so may not even be a fan. Write a short, playful catch-up ribbing them about whether they're converting to a ${subject} fan, then suggest a quick call. Match this vibe: "Hey ${c.name.split(/\s+/)[0]}, how have you been, it's been a while. ${city ?? "The city"} must be going crazy with the ${subject} in ${event.blurb}. You converting yet? Let's catch up on a call soon."`;
+      const score = Math.min(1, ((c.relevance ?? 40) / 100) * TRIGGER_WEIGHT.personal_event + 0.25);
+      const message = await draft({ name: c.name, trigger, personalContext: personalCtx, style: cx.style });
+      await db.insert(suggestions).values({
+        userId: c.userId,
+        contactId: c.id,
+        triggerType: "personal_event",
+        reason:
+          angle === "alma_mater"
+            ? `🏀 ${subject} (their alma mater) is in ${event.blurb}.`
+            : angle === "hometown_team"
+              ? `🏆 The ${subject}, their hometown team, are in ${event.blurb}.`
+              : `🎉 The ${subject} are in ${event.blurb} — the buzz in ${city ?? "their city"}.`,
+        draftMessage: message,
+        intentLabel: "Text them about the game",
+        priority: priorityOf(score),
+        score,
+        claimIds: [],
+      });
+      created++;
+    }
+
+    // --- Rekindle (LAST RESORT): keep a real relationship warm, OR open a high-relevance import
+    // we've never messaged. Demoted weight + a personal hook so it never reads as a cold timer. ---
     if (!checkinMuted && !(await alreadyPending(c.userId, c.id, "re_engage"))) {
       const rel = c.relevance ?? 0;
       const warm = lastDays !== null && lastDays > cadence && rel >= 30;
@@ -265,6 +431,7 @@ export async function runSuggestions(): Promise<void> {
             : `You know them but have no recorded outreach yet; open with a warm, no-agenda hello.`,
           focus: cx.focus,
           style: cx.style,
+          personalContext: personalCtx,
         });
         await db.insert(suggestions).values({
           userId: c.userId,

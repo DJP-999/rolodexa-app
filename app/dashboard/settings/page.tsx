@@ -44,6 +44,7 @@ const JOB_META: [string, string, string][] = [
   ["apify-enrich", "LinkedIn profiles (Apify)", "1:00 AM"],
   ["apify-resolve", "Find LinkedIn URLs (Apify)", "1:20 AM"],
   ["enrichment", "Enrichment", "2:00 AM"],
+  ["personal-profile", "Learn personal details", "3:15 AM"],
   ["fit-grade", "Score domain fit", "3:30 AM"],
   ["recompute", "Re-grade relevance", "4:00 AM"],
   ["normalize", "Group columns", "4:15 AM"],

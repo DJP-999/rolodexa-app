@@ -162,5 +162,11 @@ export async function ensureSchema(sql: {
   await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "outreach_snoozed_until" timestamptz`);
   // Manual fit/relevance override lock.
   await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "grades_locked" boolean DEFAULT false`);
+  // Personal knowledge layer (alma maters, city, work anniversary, birthday, interests).
+  await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "personal_profile" jsonb`);
+  // New personal-touch trigger types (ADD VALUE is idempotent + must run outside a txn).
+  for (const v of ["work_anniversary", "birthday", "personal_event"]) {
+    await sql.unsafe(`ALTER TYPE "trigger_type" ADD VALUE IF NOT EXISTS '${v}'`);
+  }
   console.log("[db] ensureSchema applied.");
 }

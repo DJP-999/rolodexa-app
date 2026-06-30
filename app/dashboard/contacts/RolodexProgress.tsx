@@ -22,6 +22,7 @@ type S = {
 const PRETTY: Record<string, string> = {
   enrichment: "Enriching",
   "fit-grade": "Scoring fit",
+  "personal-profile": "Learning personal details",
   recompute: "Re-grading",
   "pitchbook-sync": "Matching firms",
   "linkedin-poll": "Syncing LinkedIn",

@@ -1,7 +1,7 @@
 import { pgTable, pgEnum, uuid, text, timestamp, boolean, integer, real, jsonb, date, index, uniqueIndex, vector } from "drizzle-orm/pg-core";
 export const relationshipCategory = pgEnum("relationship_category", ["family","friend","coworker","investor","vendor","other"]);
 export const contactStatus = pgEnum("contact_status", ["active","warming","going_cold","dormant"]);
-export const triggerType = pgEnum("trigger_type", ["re_engage","job_change","milestone"]);
+export const triggerType = pgEnum("trigger_type", ["re_engage","job_change","milestone","work_anniversary","birthday","personal_event"]);
 export const suggestionStatus = pgEnum("suggestion_status", ["pending","approved","snoozed","dismissed","sent"]);
 export const priority = pgEnum("priority", ["high","medium","low"]);
 export const interactionType = pgEnum("interaction_type", ["email_in","email_out","meeting","message_in","message_out"]);
@@ -55,6 +55,19 @@ export const contacts = pgTable("contacts", {
   enrichedAt: timestamp("enriched_at", { withTimezone: true }), gradedAt: timestamp("graded_at", { withTimezone: true }),
   lastNewsCheckAt: timestamp("last_news_check_at", { withTimezone: true }),
   gradeRationale: text("grade_rationale"), summary: text("summary"), professionalFit: real("professional_fit"), profileData: jsonb("profile_data").$type<Record<string, unknown>>(), embedding: vector("embedding", { dimensions: 1536 }),
+  // The PERSONAL knowledge layer — what makes outreach feel like a friend, not a CRM: alma maters,
+  // city/hometown, current-role start (work anniversary), birthday, and interests/causes. Powers
+  // genuine, well-timed touches (anniversaries, birthdays, alma-mater/city sports moments).
+  personalProfile: jsonb("personal_profile").$type<{
+    schools?: string[];
+    currentCity?: string | null;
+    hometown?: string | null;
+    roleStartDate?: string | null;
+    birthday?: string | null;
+    interests?: string[];
+    teams?: string[];
+    extractedAt?: string;
+  }>(),
   // Firm intel matched from the user's imported PitchBook reference data (kept separate
   // from the user's own customFields/normalizedFields — never overwrites their data).
   pitchbookData: jsonb("pitchbook_data").$type<Record<string, string>>(),

@@ -15,6 +15,7 @@ import { runApifyResolve } from "./jobs/apifyResolve";
 import { runMessageBackfill } from "./jobs/messageBackfill";
 import { runRecompute } from "./jobs/recompute";
 import { runFitGrade } from "./jobs/fitGrade";
+import { runPersonalProfile } from "./jobs/personalProfile";
 import { runSplitContacts } from "./jobs/splitContacts";
 import { runPitchbookSync } from "./jobs/pitchbookSync";
 import { runSuggestions } from "./jobs/suggestions";
@@ -45,6 +46,7 @@ export const JOBS: JobDef[] = [
   { name: "apify-enrich", cron: "0 1 * * *", run: runApifyEnrich },
   { name: "apify-resolve", cron: "20 1 * * *", run: runApifyResolve },
   { name: "enrichment", cron: "0 2 * * *", run: runEnrichment },
+  { name: "personal-profile", cron: "15 3 * * *", run: runPersonalProfile },
   { name: "fit-grade", cron: "30 3 * * *", run: runFitGrade },
   { name: "recompute", cron: "0 4 * * *", run: runRecompute },
   { name: "normalize", cron: "15 4 * * *", run: runNormalize },

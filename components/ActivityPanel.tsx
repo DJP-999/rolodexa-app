@@ -39,6 +39,7 @@ function fmtEta(ms: number): string {
 const PRETTY: Record<string, string> = {
   enrichment: "Enriching your network",
   "fit-grade": "Scoring domain fit",
+  "personal-profile": "Learning personal details",
   recompute: "Re-grading relevance",
   normalize: "Grouping columns",
   "split-contacts": "Splitting multi-person rows",

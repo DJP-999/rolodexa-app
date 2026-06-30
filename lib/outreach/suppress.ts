@@ -16,9 +16,19 @@ type ContactFlags = Pick<
 
 export const SNOOZE_DAYS = 30;
 
-/** News-driven trigger types (vs. re_engage check-ins). */
+/**
+ * Genuine-moment trigger types (vs. the generic re_engage timer). These are real, well-timed
+ * reasons — job changes, milestones, birthdays, work anniversaries, personal events — so a generic
+ * "dismiss" never mutes them; only Block / Snooze do.
+ */
 export function isNewsTrigger(trigger: string | null | undefined): boolean {
-  return trigger === "job_change" || trigger === "milestone";
+  return (
+    trigger === "job_change" ||
+    trigger === "milestone" ||
+    trigger === "work_anniversary" ||
+    trigger === "birthday" ||
+    trigger === "personal_event"
+  );
 }
 
 export function outreachSuppressed(
