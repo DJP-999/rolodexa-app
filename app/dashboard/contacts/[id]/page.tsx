@@ -502,6 +502,51 @@ export default async function ContactProfile({ params }: { params: Promise<{ id:
         />
       </div>
 
+      {/* What Rolodexa knows — the personal knowledge layer powering warm, well-timed outreach */}
+      {(() => {
+        const pp = (c.personalProfile ?? null) as {
+          schools?: string[];
+          currentCity?: string | null;
+          hometown?: string | null;
+          roleStartDate?: string | null;
+          interests?: string[];
+        } | null;
+        const hasAny =
+          pp && (pp.schools?.length || pp.currentCity || pp.hometown || pp.roleStartDate || pp.interests?.length);
+        if (!hasAny) return null;
+        const start = pp!.roleStartDate ? new Date(pp!.roleStartDate) : null;
+        const yrs = start && !isNaN(start.getTime()) ? Math.floor((Date.now() - start.getTime()) / (365.25 * 86_400_000)) : 0;
+        return (
+          <div className="mt-5 rounded-2xl border border-hairline bg-white p-5">
+            <h2 className="flex items-center gap-2 text-sm font-semibold">
+              <Users className="h-4 w-4 text-muted" /> What Rolodexa knows
+            </h2>
+            <div className="mt-3 grid grid-cols-2 gap-4 sm:grid-cols-3">
+              {pp!.schools?.length ? <Field label="Education">{pp!.schools.join(", ")}</Field> : null}
+              {pp!.hometown ? <Field label="Hometown">{pp!.hometown}</Field> : null}
+              {pp!.currentCity ? <Field label="Based in">{pp!.currentCity}</Field> : null}
+              {start && yrs >= 1 ? (
+                <Field label="Tenure">
+                  {yrs} yr{yrs > 1 ? "s" : ""} (since {start.toLocaleDateString("en-US", { month: "short", year: "numeric" })})
+                </Field>
+              ) : null}
+            </div>
+            {pp!.interests?.length ? (
+              <div className="mt-3">
+                <div className="text-[11px] font-medium uppercase tracking-wide text-muted">Interests</div>
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  {pp!.interests.map((it, i) => (
+                    <span key={i} className="rounded-full bg-black/[0.05] px-2.5 py-0.5 text-xs text-ink">
+                      {it}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        );
+      })()}
+
       {/* Details */}
       <div className="mt-5 rounded-2xl border border-hairline bg-white p-5">
         <h2 className="flex items-center gap-2 text-sm font-semibold">
