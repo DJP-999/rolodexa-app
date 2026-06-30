@@ -17,6 +17,7 @@ import { runRecompute } from "./jobs/recompute";
 import { runFitGrade } from "./jobs/fitGrade";
 import { runPersonalProfile } from "./jobs/personalProfile";
 import { runRemindersDue } from "./jobs/remindersDue";
+import { runFollowThrough } from "./jobs/followThrough";
 import { runSplitContacts } from "./jobs/splitContacts";
 import { runPitchbookSync } from "./jobs/pitchbookSync";
 import { runSuggestions } from "./jobs/suggestions";
@@ -53,6 +54,8 @@ export const JOBS: JobDef[] = [
   { name: "recompute", cron: "0 4 * * *", run: runRecompute },
   { name: "normalize", cron: "15 4 * * *", run: runNormalize },
   { name: "suggestions", cron: "0 6 * * *", run: runSuggestions },
+  // Hourly: catch replies (ball in your court), silent threads to follow up, and slipping ties.
+  { name: "follow-through", cron: "0 * * * *", run: runFollowThrough },
   { name: "morning-brief", cron: "0 7 * * *", run: () => runBrief("morning-newsletter") },
   { name: "midday-brief", cron: "30 12 * * *", run: () => runBrief("midday-update") },
   { name: "night-brief", cron: "0 20 * * *", run: () => runBrief("night-brief") },

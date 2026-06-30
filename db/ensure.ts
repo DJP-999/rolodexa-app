@@ -177,8 +177,8 @@ export async function ensureSchema(sql: {
     "sent_at" timestamptz
   )`);
   await sql.unsafe(`CREATE INDEX IF NOT EXISTS "reminders_status_due_idx" ON "reminders" ("status","due_at")`);
-  // New personal-touch trigger types (ADD VALUE is idempotent + must run outside a txn).
-  for (const v of ["work_anniversary", "birthday", "personal_event"]) {
+  // New trigger types: personal touches + the follow-through / going-cold engine.
+  for (const v of ["work_anniversary", "birthday", "personal_event", "reply", "follow_up", "going_cold"]) {
     await sql.unsafe(`ALTER TYPE "trigger_type" ADD VALUE IF NOT EXISTS '${v}'`);
   }
   console.log("[db] ensureSchema applied.");

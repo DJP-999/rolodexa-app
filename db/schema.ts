@@ -1,7 +1,7 @@
 import { pgTable, pgEnum, uuid, text, timestamp, boolean, integer, real, jsonb, date, index, uniqueIndex, vector } from "drizzle-orm/pg-core";
 export const relationshipCategory = pgEnum("relationship_category", ["family","friend","coworker","investor","vendor","other"]);
 export const contactStatus = pgEnum("contact_status", ["active","warming","going_cold","dormant"]);
-export const triggerType = pgEnum("trigger_type", ["re_engage","job_change","milestone","work_anniversary","birthday","personal_event"]);
+export const triggerType = pgEnum("trigger_type", ["re_engage","job_change","milestone","work_anniversary","birthday","personal_event","reply","follow_up","going_cold"]);
 export const suggestionStatus = pgEnum("suggestion_status", ["pending","approved","snoozed","dismissed","sent"]);
 export const priority = pgEnum("priority", ["high","medium","low"]);
 export const interactionType = pgEnum("interaction_type", ["email_in","email_out","meeting","message_in","message_out"]);

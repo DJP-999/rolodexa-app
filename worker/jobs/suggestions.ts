@@ -81,7 +81,7 @@ function hasLeak(s: string): boolean {
 }
 
 /** Draft a short, friendly outreach note AS the user, in their learned voice. */
-async function draft(opts: {
+export async function draft(opts: {
   name: string;
   trigger: string;
   focus?: string | null;

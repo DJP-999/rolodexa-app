@@ -27,7 +27,8 @@ export function isNewsTrigger(trigger: string | null | undefined): boolean {
     trigger === "milestone" ||
     trigger === "work_anniversary" ||
     trigger === "birthday" ||
-    trigger === "personal_event"
+    trigger === "personal_event" ||
+    trigger === "reply" // a reply is a real, in-flight conversation — never muted by a generic dismiss
   );
 }
 

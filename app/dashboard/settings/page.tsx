@@ -49,6 +49,7 @@ const JOB_META: [string, string, string][] = [
   ["recompute", "Re-grade relevance", "4:00 AM"],
   ["normalize", "Group columns", "4:15 AM"],
   ["suggestions", "Suggestions", "6:00 AM"],
+  ["follow-through", "Replies & follow-ups", "Hourly"],
   ["news-scan", "News scan", "10a/3p/6p"],
   ["email-poll", "Email Poll", "Every 30m"],
   ["linkedin-poll", "LinkedIn Poll", "Every 30m"],
