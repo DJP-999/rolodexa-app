@@ -79,8 +79,20 @@ export async function saveContextAction(formData: FormData) {
     await db.insert(userContext).values({ userId: user.id, ...values, relationshipTypes, ...styleFields });
   }
 
-  // Context drives domain-fit; re-grade fit (which re-runs relevance) in the background
-  // so the whole network re-ranks against the new focus. Non-blocking so Save returns fast.
+  // Context drives domain-fit. If the user's role/focus/projects/priority people actually changed,
+  // the WHOLE network must re-rank against the new focus — so clear the per-contact grade signature
+  // (which makes every contact "needs grading") before kicking off fit-grade. Otherwise the
+  // incremental grader would find nothing to do and the new context would silently not apply.
+  const contextChanged =
+    !existing ||
+    values.role !== (existing.role ?? null) ||
+    values.currentFocus !== (existing.currentFocus ?? null) ||
+    values.activeProjects !== (existing.activeProjects ?? null) ||
+    values.priorityConnections !== (existing.priorityConnections ?? null);
+  if (contextChanged) {
+    await db.update(contacts).set({ fitGradedModel: null }).where(eq(contacts.userId, user.id));
+  }
+  // Re-grade in the background (shows live progress in the status bar). Non-blocking so Save returns fast.
   await enqueue("fit-grade");
   revalidatePath("/dashboard/settings");
   revalidatePath("/dashboard");

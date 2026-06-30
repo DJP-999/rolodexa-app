@@ -14,6 +14,7 @@ import {
 } from "./actions";
 import { WeightsEditor } from "./WeightsEditor";
 import { JobsGrid, type Job } from "./JobsGrid";
+import { LiveJobStatus } from "./LiveJobStatus";
 import { SaveButton } from "./SaveButton";
 import { TelegramControls } from "./TelegramControls";
 import { DangerZone } from "./DangerZone";
@@ -209,6 +210,9 @@ export default async function SettingsPage({
         <h1 className="text-3xl font-bold">Settings</h1>
         <p className="text-sm text-muted">Configure your profile, scoring weights, and connections.</p>
       </div>
+
+      {/* Always-visible status of any background work (re-grade after Save, a Run Now job, etc.). */}
+      <LiveJobStatus />
 
       <Section
         title="Connected accounts"
