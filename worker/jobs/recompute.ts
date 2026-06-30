@@ -66,9 +66,10 @@ function professionalSignal(
   const hay = [c.name, c.company, c.role, c.industry].filter(Boolean).join(" ").toLowerCase();
   const needles = tokenize([ctx.currentFocus, ctx.activeProjects, ctx.role].filter(Boolean).join(" "));
   const hits = needles.filter((t) => hay.includes(t)).length;
+  // Agnostic keyword fallback (used ONLY until a contact is LLM fit-graded): overlap with the
+  // user's OWN focus/projects/role, plus a priority-name match. No industry is privileged.
   let s = 0.35 + Math.min(0.4, hits * 0.1);
   if (priority) s += 0.25;
-  if (c.relationship === "investor") s += 0.1;
   return { signal: Math.min(1, s), priority };
 }
 

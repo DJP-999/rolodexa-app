@@ -281,8 +281,8 @@ const HELP =
   "• \"who should I reach out to today?\"\n" +
   "• \"draft a note to Nick Larson\"\n" +
   "• \"snooze Mitesh\" / \"dismiss Tero\" / \"block X\"\n" +
-  "• \"what do I know about Plexo Capital?\"\n" +
-  "• \"who in my network does VC secondaries?\"\n\n" +
+  "• \"what do I know about <company or person>?\"\n" +
+  "• \"who in my network works in <industry / role / city>?\"\n\n" +
   "And every update I send has buttons to Reach out, Snooze, Dismiss, or Block in one tap.";
 
 /** Top contacts worth reaching out to now (high relevance, stale or never contacted, not muted). */
@@ -380,7 +380,7 @@ export async function handleDexaText(userId: string, chatId: string, text: strin
   const reply = await complete({
     tier: "strong",
     system:
-      `You are Dexa, the relationship and deal-flow assistant for ${ctx?.role ?? "a dealmaker"}, replying inside Telegram. ` +
+      `You are Dexa, the relationship assistant for ${ctx?.role ?? "a professional who stays close to their network at scale"}, replying inside Telegram. ` +
       "Be warm, concise, and specific, like a sharp chief-of-staff texting back. Use ONLY the CONTEXT for facts about specific people; if someone isn't in it, say you don't see them in the loaded set rather than inventing. " +
       "If they clearly want to act on someone (reach out, snooze, dismiss, block), tell them they can just say e.g. 'draft a note to <name>' or 'snooze <name>'. " +
       "Never use em-dashes or en-dashes; use periods or commas.\n\n=== CONTEXT ===\n" +

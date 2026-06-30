@@ -314,19 +314,19 @@ export default async function SettingsPage({
         <form action={saveContextAction} className="space-y-4">
           <label className="block">
             <span className="text-sm font-medium text-ink">Your role</span>
-            <input name="role" defaultValue={ctx?.role ?? ""} placeholder="Founder & dealmaker — pre-IPO secondaries, LMM buyouts" className={inputCls} />
+            <input name="role" defaultValue={ctx?.role ?? ""} placeholder="e.g. VP of Sales · Head of Partnerships · Investor Relations · Founder · BD lead" className={inputCls} />
           </label>
           <label className="block">
             <span className="text-sm font-medium text-ink">What are you focused on?</span>
-            <textarea name="currentFocus" defaultValue={ctx?.currentFocus ?? ""} rows={2} placeholder="Raising a $25M LMM buyout SPV; sourcing family-office LPs." className={inputCls} />
+            <textarea name="currentFocus" defaultValue={ctx?.currentFocus ?? ""} rows={2} placeholder="What you're working toward, in your words. e.g. Landing enterprise customers in fintech; building channel partnerships; recruiting senior engineers; raising a fund." className={inputCls} />
           </label>
           <label className="block">
             <span className="text-sm font-medium text-ink">Active projects / deals</span>
-            <textarea name="activeProjects" defaultValue={ctx?.activeProjects ?? ""} rows={3} placeholder={"SpaceX secondary\nVici Peptides raise"} className={inputCls} />
+            <textarea name="activeProjects" defaultValue={ctx?.activeProjects ?? ""} rows={3} placeholder={"Your active deals / projects, one per line\ne.g. Acme Corp renewal\nQ3 partner launch"} className={inputCls} />
           </label>
           <label className="block">
             <span className="text-sm font-medium text-ink">Priority connections</span>
-            <textarea name="priorityConnections" defaultValue={ctx?.priorityConnections ?? ""} rows={2} placeholder="Kevin Henderson, Jennifer Prosek" className={inputCls} />
+            <textarea name="priorityConnections" defaultValue={ctx?.priorityConnections ?? ""} rows={2} placeholder="The TYPES of people you most want to reach. e.g. CTOs at mid-market SaaS; hospital procurement leads; family offices; channel partners in EMEA." className={inputCls} />
           </label>
           <label className="block">
             <span className="text-sm font-medium text-ink">Writing style</span>

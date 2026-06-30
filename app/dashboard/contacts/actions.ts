@@ -68,14 +68,10 @@ async function mapColumnsLLM(headers: string[], samples: string[][]): Promise<Pa
   return out;
 }
 
-function guessRelationship(company: string, role: string): Rel {
-  const s = `${company} ${role}`.toLowerCase();
-  if (
-    /capital|ventures?|partners|fund|equity|family office|investor|asset|wealth|holdings?|investment|advis|secondar|hedge|private equity|growth/.test(
-      s,
-    )
-  )
-    return "investor";
+// Import-time relationship is left neutral ("other") on purpose — the background categorizer
+// (enrichment.categorizeUser) then classifies each contact agnostically from its real role/firm,
+// so we never pre-bias an import toward any one industry (e.g. finance) at upload time.
+function guessRelationship(_company: string, _role: string): Rel {
   return "other";
 }
 

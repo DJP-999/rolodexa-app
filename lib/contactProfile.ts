@@ -40,7 +40,7 @@ async function generateBio(c: Contact, recentNews: string[]): Promise<string> {
   const bio = await complete({
     tier: "cheap",
     system:
-      "Write a 2-3 sentence factual professional bio of a contact for a dealmaker's CRM. " +
+      "Write a 2-3 sentence factual professional bio of a contact for a relationship CRM. " +
       "Use ONLY the facts given; never invent details or use placeholders. Plain prose, no preamble.",
     messages: [
       { role: "user", content: `Contact: ${c.name}.\nFacts: ${facts || "limited information"}.\nWrite the bio.` },

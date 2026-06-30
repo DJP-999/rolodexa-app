@@ -508,7 +508,7 @@ async function categorizeUser(userId: string): Promise<void> {
   const ctx = (await db.select().from(userContext).where(eq(userContext.userId, userId)).limit(1))[0];
   const who = ctx?.role
     ? `a ${ctx.role}${ctx.currentFocus ? ` focused on ${ctx.currentFocus}` : ""}`
-    : "a relationship-first dealmaker in private markets";
+    : "a professional who stays close to a large network";
   const refreshed = await db.select().from(contacts).where(eq(contacts.userId, userId));
   // Re-evaluate unset/'other' AND existing 'vendor' labels (the latter are frequently
   // mis-tagged investment firms), but never touch the user's personal classifications.

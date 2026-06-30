@@ -102,12 +102,9 @@ function buildFitInput(c: Contact, firmMap?: Map<string, string>, threads?: Map<
 /** Research firms of the most valuable contacts first: investors, then high relevance/fit, so
  *  on-thesis firms get a brief even when the per-run cap can't cover the whole long tail. */
 function firmPriority(c: Contact): number {
-  return (
-    (c.relationship === "investor" ? 2 : 0) +
-    (c.highValue ? 1 : 0) +
-    (c.relevance ?? 0) / 100 +
-    (c.professionalFit ?? 0)
-  );
+  // Agnostic: importance is the user's own VIP flag + how well the contact fits THEIR stated goals
+  // (relevance/fit) — never a hardcoded preference for any one industry or relationship type.
+  return (c.highValue ? 1 : 0) + (c.relevance ?? 0) / 100 + (c.professionalFit ?? 0);
 }
 
 function focusFor(ctx: typeof userContext.$inferSelect | undefined): UserFocus {
@@ -182,9 +179,10 @@ async function persist(
  *  relevance/fit — with a boost for never-graded contacts so brand-new imports still surface
  *  early. So a long pass updates the important people in the first minute, not the last. */
 function gradePriority(c: Contact): number {
+  // Agnostic ordering: the user's VIPs first, then never-graded (so new imports surface), then by
+  // relevance + fit to the user's OWN goals. No industry/relationship type is privileged.
   return (
-    (c.relationship === "investor" ? 1000 : 0) +
-    (c.highValue ? 500 : 0) +
+    (c.highValue ? 1000 : 0) +
     (c.professionalFit == null ? 300 : 0) +
     (c.relevance ?? 0) +
     (c.professionalFit ?? 0) * 100

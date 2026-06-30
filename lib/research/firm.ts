@@ -31,7 +31,7 @@ async function summarizeFirm(name: string): Promise<string | null> {
   let results;
   try {
     results = await exaSearch({
-      query: `${name} investment firm — strategy, stage focus, asset class, portfolio companies, assets under management`,
+      query: `${name} company — what they do, industry, products or services, customers, size`,
       numResults: 6,
     });
   } catch (e) {
@@ -46,7 +46,7 @@ async function summarizeFirm(name: string): Promise<string | null> {
   const raw = await complete({
     tier: "cheap",
     system:
-      "You distill web results about a finance/investment firm into a tight factual brief for a dealmaker. 4-6 sentences, dense, no fluff. Cover, in order: (1) what the firm IS — its type (VC, growth, buyout PE, family office, fund-of-funds, secondaries, private credit, hedge fund, placement agent, etc.); (2) its strategy and the SPECIFIC stage and asset class it invests in (e.g. early-stage venture equity vs late-stage/pre-IPO vs buyout vs LP fund stakes vs credit); (3) notable portfolio companies or holdings; (4) approximate AUM or fund size; (5) anything distinctive. If the results clearly describe a DIFFERENT firm that merely shares the name, say which facts are uncertain and report ONLY what is confidently about this firm. Never invent facts; if something isn't in the results, omit it.",
+      "You distill web results about an ORGANIZATION into a tight factual brief for a professional building a relationship with someone who works there. 4-6 sentences, dense, no fluff. Cover, in order: (1) what the organization IS and DOES — its industry and type (e.g. a SaaS company, hospital system, law firm, manufacturer, agency, nonprofit, or an investor like a VC/PE firm/family office); (2) its focus, main products or services, and the specific market, segment, or (for investors) the stage/asset class it operates in; (3) notable customers, clients, portfolio companies, or partnerships; (4) approximate size (revenue, headcount, AUM, or fund size); (5) anything distinctive. If the results clearly describe a DIFFERENT organization that merely shares the name, say which facts are uncertain and report ONLY what is confidently about this one. Never invent facts; if something isn't in the results, omit it.",
     messages: [{ role: "user", content: `Firm: ${name}\n\nWeb results:\n${corpus}` }],
     maxTokens: 400,
     temperature: 0,
