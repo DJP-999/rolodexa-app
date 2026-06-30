@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { contacts, reminders, suggestions, userContext } from "@/db/schema";
+import { contacts, interactions, reminders, suggestions, userContext } from "@/db/schema";
 import { answerCallback, finishCard, sendMessage, type ApprovalButton } from "@/lib/integrations/telegram";
 import { resolveChannel } from "@/lib/outreach/deliver";
 import { SNOOZE_DAYS } from "@/lib/outreach/suppress";
@@ -257,6 +257,113 @@ export async function handleReminderAction(
   await finishCard(chatId, messageId, origText, "✅ Done");
 }
 
+// ---- Off-channel interaction capture ("just had coffee with X…") ---------------------------
+
+/** Gate so we only spend an LLM call when the message smells like logging a real interaction. */
+function looksLikeLog(t: string): boolean {
+  return /\b(met|meeting|spoke|talked|chatted|caught up|connected|called|hopped on|jumped on|ran into|grabbed|had (a |an )?(call|coffee|lunch|dinner|breakfast|drinks|meeting|chat|sync))\b/i.test(
+    t,
+  ) && !/\bremind me\b/i.test(t);
+}
+
+/**
+ * Capture an off-channel touchpoint the user just had ("just had coffee with Sarah Chen, she's
+ * hiring a VP Sales, follow up in 2 weeks"). Logs the interaction (so last-contacted updates and
+ * going-cold won't false-fire on someone you just saw), saves the note to the contact, and sets a
+ * follow-up reminder if mentioned. Returns false if it doesn't parse as a log, to fall through.
+ */
+async function parseAndLogInteraction(userId: string, chatId: string, t: string): Promise<boolean> {
+  const now = new Date();
+  const raw = await complete({
+    tier: "cheap",
+    system:
+      "Extract an interaction the user just had with someone, for their relationship CRM. Return JSON only: " +
+      `{"isLog": boolean, "contactName": string|null, "kind": "meeting"|"call"|"message"|"event", "occurredAt": ISO 8601, "note": "concise third-person summary of what was discussed or learned (or empty)", "followUp": {"note": string, "dueAt": ISO 8601}|null}. ` +
+      "Resolve relative times (today, yesterday, this morning) and follow-up timing ('in 2 weeks', 'next Monday') against the current time, US Eastern; default occurredAt to now. " +
+      "isLog is false ONLY if the user is NOT recording an interaction that already happened (e.g. it's a question or a pure reminder).",
+    messages: [{ role: "user", content: `Current time: ${now.toISOString()} (US Eastern). Message: ${t}` }],
+    maxTokens: 240,
+    temperature: 0,
+  });
+  let p: { isLog?: boolean; contactName?: string | null; kind?: string; occurredAt?: string; note?: string; followUp?: { note?: string; dueAt?: string } | null };
+  try {
+    p = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] ?? "{}");
+  } catch {
+    return false;
+  }
+  if (!p.isLog || !p.contactName) return false;
+
+  const contact = await resolveContactByName(userId, p.contactName);
+  const when = p.occurredAt ? new Date(p.occurredAt) : now;
+  const occurredAt = isNaN(when.getTime()) ? now : when;
+  const kind = (["meeting", "call", "message", "event"].includes(p.kind ?? "") ? p.kind : "meeting") as string;
+  const note = (p.note ?? "").trim();
+
+  // Follow-up reminder (works whether or not the contact is in the rolodex).
+  let reminderLine = "";
+  if (p.followUp?.note && p.followUp.dueAt) {
+    const due = new Date(p.followUp.dueAt);
+    if (!isNaN(due.getTime())) {
+      await db.insert(reminders).values({
+        userId,
+        contactId: contact?.id ?? null,
+        contactName: p.contactName ?? contact?.name ?? null,
+        note: p.followUp.note.slice(0, 300),
+        dueAt: due,
+      });
+      const w = due.toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "America/New_York" });
+      reminderLine = ` Reminder set for ${w} to ${p.followUp.note}.`;
+    }
+  }
+
+  if (!contact) {
+    await sendMessage(
+      chatId,
+      `I don't see "${p.contactName}" in your rolodex yet, so I couldn't attach the note.${reminderLine} Add them and I'll keep the full history.`,
+      undefined,
+      { plain: true },
+    );
+    return true;
+  }
+
+  // Log the interaction so it counts toward last-contacted, recency, and KPIs.
+  await db
+    .insert(interactions)
+    .values({
+      userId,
+      contactId: contact.id,
+      eventType: kind === "message" ? "message_out" : "meeting",
+      direction: kind === "message" ? "outbound" : null,
+      channel: "manual",
+      occurredAt,
+      sourceRef: `manual:${Date.now()}`,
+      metadata: { text: note || `${kind} (logged)`, kind },
+    })
+    .onConflictDoNothing();
+
+  // Refresh the contact: mark it active again, bump last-contacted, and save the note where the
+  // grader and draft-writer will read it.
+  const cf = (contact.customFields ?? {}) as Record<string, string>;
+  const set: Partial<typeof contacts.$inferInsert> = { status: "active" };
+  if (!contact.lastContactedAt || new Date(contact.lastContactedAt).getTime() < occurredAt.getTime()) {
+    set.lastContactedAt = occurredAt;
+  }
+  if (note) {
+    const dateStr = occurredAt.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    set.customFields = { ...cf, "Meeting Notes": `[${dateStr}] ${note}\n${cf["Meeting Notes"] ?? ""}`.slice(0, 2000) };
+  }
+  await db.update(contacts).set(set).where(eq(contacts.id, contact.id));
+
+  const kindLabel = kind === "call" ? "call" : kind === "message" ? "note" : kind === "event" ? "run-in" : "meeting";
+  await sendMessage(
+    chatId,
+    `✅ Logged a ${kindLabel} with ${contact.name}.${note ? " Saved your note." : ""}${reminderLine} They're marked active again.`,
+    undefined,
+    { plain: true },
+  );
+  return true;
+}
+
 // ---- Free-text conversation + commands -----------------------------------------------------
 
 type Command = { verb: "reach" | "snooze" | "dismiss" | "block"; name: string };
@@ -350,6 +457,13 @@ export async function handleDexaText(userId: string, chatId: string, text: strin
           : `Blocked ${c.name} — no more updates 🚫`;
     await sendMessage(chatId, note, undefined, { plain: true });
     return;
+  }
+
+  // 1.4) Log an off-channel interaction ("just had coffee with Sarah, she's hiring, follow up in 2w").
+  // Checked before reminders since a log often carries its own follow-up.
+  if (looksLikeLog(t)) {
+    const ok = await parseAndLogInteraction(userId, chatId, t);
+    if (ok) return;
   }
 
   // 1.5) Reminder / note-to-self ("remind me early next week to follow up with John Corley").

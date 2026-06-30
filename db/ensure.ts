@@ -168,6 +168,8 @@ export async function ensureSchema(sql: {
   // user's own category set. Safe idempotent enum→text conversion (existing values preserved).
   await sql.unsafe(`ALTER TABLE "contacts" ALTER COLUMN "relationship" TYPE text USING "relationship"::text`);
   await sql.unsafe(`ALTER TABLE "user_context" ADD COLUMN IF NOT EXISTS "relationship_types" jsonb`);
+  // 'manual' channel for user-logged off-channel touchpoints (meetings, calls, coffees).
+  await sql.unsafe(`ALTER TYPE "channel" ADD VALUE IF NOT EXISTS 'manual'`);
   // Follow-up reminders captured from the Telegram chat.
   await sql.unsafe(`CREATE TABLE IF NOT EXISTS "reminders" (
     "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),

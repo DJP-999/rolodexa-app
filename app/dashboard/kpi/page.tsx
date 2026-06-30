@@ -10,6 +10,7 @@ const CHANNEL: Record<string, { label: string; cls: string }> = {
   nylas_calendar: { label: "Meeting", cls: "bg-amber-50 text-amber-700" },
   telegram: { label: "Telegram", cls: "bg-violet-50 text-violet-700" },
   imessage: { label: "iMessage", cls: "bg-emerald-50 text-emerald-700" },
+  manual: { label: "In person", cls: "bg-rose-50 text-rose-700" },
 };
 
 function CommRow({ c }: { c: Comm }) {

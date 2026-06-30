@@ -5,7 +5,7 @@ export const triggerType = pgEnum("trigger_type", ["re_engage","job_change","mil
 export const suggestionStatus = pgEnum("suggestion_status", ["pending","approved","snoozed","dismissed","sent"]);
 export const priority = pgEnum("priority", ["high","medium","low"]);
 export const interactionType = pgEnum("interaction_type", ["email_in","email_out","meeting","message_in","message_out"]);
-export const channel = pgEnum("channel", ["nylas_email","nylas_calendar","telegram","imessage","agent_audit","linkedin"]);
+export const channel = pgEnum("channel", ["nylas_email","nylas_calendar","telegram","imessage","agent_audit","linkedin","manual"]);
 export const notificationOutcome = pgEnum("notification_outcome", ["sent","opened","clicked","approved","snoozed","dismissed","ignored"]);
 export const coldStatus = pgEnum("cold_status", ["messaged","replied","meeting_set","ghosted","promoted"]);
 
