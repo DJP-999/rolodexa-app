@@ -329,6 +329,11 @@ export default async function SettingsPage({
             <textarea name="priorityConnections" defaultValue={ctx?.priorityConnections ?? ""} rows={2} placeholder="The TYPES of people you most want to reach. e.g. CTOs at mid-market SaaS; hospital procurement leads; family offices; channel partners in EMEA." className={inputCls} />
           </label>
           <label className="block">
+            <span className="text-sm font-medium text-ink">Relationship categories</span>
+            <span className="block text-xs text-muted">How you bucket your network. Leave blank and Dexa tailors them to your role.</span>
+            <textarea name="relationshipTypes" defaultValue={(ctx?.relationshipTypes ?? []).join(", ")} rows={2} placeholder="e.g. Prospect, Customer, Champion, Partner, Colleague, Other" className={inputCls} />
+          </label>
+          <label className="block">
             <span className="text-sm font-medium text-ink">Writing style</span>
             <span className="block text-xs text-muted">
               {ctx?.writingStyleSource === "manual"

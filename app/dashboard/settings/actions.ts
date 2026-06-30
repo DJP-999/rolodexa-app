@@ -18,6 +18,7 @@ import {
   messageLog,
 } from "@/db/schema";
 import { getPrimaryUser, getConnectedAccount } from "@/lib/user";
+import { deriveRelationshipTypes, cleanRelationshipTypes } from "@/lib/agent/relationshipTypes";
 import { createHostedAuthLink } from "@/lib/integrations/unipile";
 import { nylasAuthUrl } from "@/lib/integrations/nylas";
 import { sendMessage } from "@/lib/integrations/telegram";
@@ -51,6 +52,13 @@ export async function saveContextAction(formData: FormData) {
     await db.select().from(userContext).where(eq(userContext.userId, user.id)).limit(1)
   )[0];
 
+  // Relationship categories: if the user typed their own (the field is pre-filled with the current
+  // set), use those; otherwise derive a set tailored to their role/focus. Always end with a set.
+  const rawTypes = get("relationshipTypes");
+  const relationshipTypes = rawTypes
+    ? cleanRelationshipTypes(rawTypes.split(/[\n,]+/))
+    : await deriveRelationshipTypes(values.role, values.currentFocus);
+
   // Track whether the writing style is a hand edit (manual) or left to Dexa (auto).
   // Clearing the field resumes auto-learning; editing it pins the user's own wording.
   const styleVal = values.writingStyle;
@@ -65,10 +73,10 @@ export async function saveContextAction(formData: FormData) {
   if (existing) {
     await db
       .update(userContext)
-      .set({ ...values, ...styleFields, updatedAt: new Date() })
+      .set({ ...values, relationshipTypes, ...styleFields, updatedAt: new Date() })
       .where(eq(userContext.userId, user.id));
   } else {
-    await db.insert(userContext).values({ userId: user.id, ...values, ...styleFields });
+    await db.insert(userContext).values({ userId: user.id, ...values, relationshipTypes, ...styleFields });
   }
 
   // Context drives domain-fit; re-grade fit (which re-runs relevance) in the background

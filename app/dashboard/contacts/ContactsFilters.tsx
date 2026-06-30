@@ -4,17 +4,20 @@ import { useRef } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { Search, SlidersHorizontal } from "lucide-react";
 
-const CATS = ["Coworker", "Friend", "Investor", "Other", "Vendor"];
+const FALLBACK_CATS = ["Prospect", "Client", "Partner", "Colleague", "Friend", "Other"];
 
 export function ContactsFilters({
   enriched,
   vip = 0,
   promoted = 0,
+  categories,
 }: {
   enriched: number;
   vip?: number;
   promoted?: number;
+  categories?: string[];
 }) {
+  const CATS = categories?.length ? categories : FALLBACK_CATS;
   const router = useRouter();
   const params = useSearchParams();
   const pathname = usePathname();

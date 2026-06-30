@@ -164,6 +164,10 @@ export async function ensureSchema(sql: {
   await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "grades_locked" boolean DEFAULT false`);
   // Personal knowledge layer (alma maters, city, work anniversary, birthday, interests).
   await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "personal_profile" jsonb`);
+  // Dynamic, per-user relationship categories: relax the fixed enum to free text, and store each
+  // user's own category set. Safe idempotent enum→text conversion (existing values preserved).
+  await sql.unsafe(`ALTER TABLE "contacts" ALTER COLUMN "relationship" TYPE text USING "relationship"::text`);
+  await sql.unsafe(`ALTER TABLE "user_context" ADD COLUMN IF NOT EXISTS "relationship_types" jsonb`);
   // Follow-up reminders captured from the Telegram chat.
   await sql.unsafe(`CREATE TABLE IF NOT EXISTS "reminders" (
     "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),

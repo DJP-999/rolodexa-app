@@ -17,15 +17,27 @@ type Values = {
   summary: string;
 };
 
-const REL = ["investor", "friend", "coworker", "vendor", "family", "other"];
+const FALLBACK_REL = ["Prospect", "Client", "Partner", "Colleague", "Friend", "Other"];
 const inputCls =
   "mt-1 w-full rounded-lg border border-hairline bg-white px-3 py-2 text-sm outline-none focus:border-black/30";
 
-export default function ContactEditForm({ id, initial }: { id: string; initial: Values }) {
+export default function ContactEditForm({
+  id,
+  initial,
+  categories,
+}: {
+  id: string;
+  initial: Values;
+  categories?: string[];
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [v, setV] = useState<Values>(initial);
   const [pending, start] = useTransition();
+  // The user's own categories, plus the contact's current label (so a stale one still shows).
+  const relOptions = Array.from(
+    new Set([...(categories?.length ? categories : FALLBACK_REL), v.relationship].filter(Boolean)),
+  );
 
   const field = (k: keyof Values) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
     setV((s) => ({ ...s, [k]: e.target.value }));
@@ -89,7 +101,7 @@ export default function ContactEditForm({ id, initial }: { id: string; initial: 
           <label className="block text-xs font-medium text-muted">
             Relationship
             <select value={v.relationship} onChange={field("relationship")} className={`${inputCls} capitalize`}>
-              {REL.map((r) => (
+              {relOptions.map((r) => (
                 <option key={r} value={r}>
                   {r}
                 </option>

@@ -50,6 +50,19 @@ async function getRecentlyPromotedIds(): Promise<Set<string>> {
   }
 }
 
+async function getRelationshipTypes(): Promise<string[]> {
+  try {
+    const u = await getPrimaryUser();
+    if (!u) return [];
+    const row = (
+      await db.select({ rt: userContext.relationshipTypes }).from(userContext).where(eq(userContext.userId, u.id)).limit(1)
+    )[0];
+    return (row?.rt ?? []) as string[];
+  } catch {
+    return [];
+  }
+}
+
 async function getFieldGroupings(): Promise<Record<string, { label: string; categories: string[]; multi?: boolean }>> {
   try {
     const u = await getPrimaryUser();
@@ -86,10 +99,11 @@ export default async function ContactsPage({
   }>;
 }) {
   const sp = await searchParams;
-  const [all, fieldGroupings, promotedIds] = await Promise.all([
+  const [all, fieldGroupings, promotedIds, relationshipTypes] = await Promise.all([
     getContacts(),
     getFieldGroupings(),
     getRecentlyPromotedIds(),
+    getRelationshipTypes(),
   ]);
   const enriched = all?.filter((c) => c.enrichedAt).length ?? 0;
   const vipCount = all?.filter((c) => c.highValue).length ?? 0;
@@ -107,7 +121,7 @@ export default async function ContactsPage({
       } ${cf}`.toLowerCase();
       if (!hay.includes(q)) return false;
     }
-    if (rel && (c.relationship ?? "other") !== rel) return false;
+    if (rel && (c.relationship ?? "other").toLowerCase() !== rel.toLowerCase()) return false;
     if (tab === "enriched" && !c.enrichedAt) return false;
     if (tab === "needs" && c.relevance != null) return false;
     if (tab === "vip" && !c.highValue) return false;
@@ -217,7 +231,7 @@ export default async function ContactsPage({
       )}
 
       <Suspense fallback={<div className="mt-5 h-[88px]" />}>
-        <ContactsFilters enriched={enriched} vip={vipCount} promoted={promotedCount} />
+        <ContactsFilters enriched={enriched} vip={vipCount} promoted={promotedCount} categories={relationshipTypes} />
       </Suspense>
 
       {!all ? (

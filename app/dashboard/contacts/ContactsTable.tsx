@@ -76,14 +76,23 @@ const ORDER_KEY = "rolodexa.contactOrder";
 const SORT_KEY = "rolodexa.contactSort";
 const LABELS_KEY = "rolodexa.contactLabels";
 
-const REL_BADGE: Record<string, string> = {
-  investor: "bg-violet-100 text-violet-700",
-  friend: "bg-rose-100 text-rose-700",
-  coworker: "bg-sky-100 text-sky-700",
-  vendor: "bg-amber-100 text-amber-700",
-  family: "bg-emerald-100 text-emerald-700",
-  other: "bg-black/[0.05] text-muted",
-};
+const BADGE_PALETTE = [
+  "bg-violet-100 text-violet-700",
+  "bg-sky-100 text-sky-700",
+  "bg-emerald-100 text-emerald-700",
+  "bg-amber-100 text-amber-700",
+  "bg-rose-100 text-rose-700",
+  "bg-indigo-100 text-indigo-700",
+  "bg-teal-100 text-teal-700",
+];
+/** Stable color for any relationship label (categories are now user-defined / free-form). */
+function relBadge(label?: string | null): string {
+  const s = (label ?? "").trim().toLowerCase();
+  if (!s || s === "other") return "bg-black/[0.05] text-muted";
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return BADGE_PALETTE[h % BADGE_PALETTE.length];
+}
 const DOT: Record<string, string> = {
   active: "bg-emerald-500",
   warming: "bg-emerald-500",
@@ -572,7 +581,7 @@ export function ContactsTable({
       case "relationship":
         return (
           <span
-            className={`inline-flex rounded-md px-2 py-0.5 text-xs font-medium capitalize ${REL_BADGE[r.relationship ?? "other"]}`}
+            className={`inline-flex rounded-md px-2 py-0.5 text-xs font-medium capitalize ${relBadge(r.relationship)}`}
           >
             {r.relationship ?? "other"}
           </span>

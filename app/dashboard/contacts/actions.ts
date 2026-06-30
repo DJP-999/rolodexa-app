@@ -349,9 +349,8 @@ export async function updateContactAction(
   if (v.industry !== undefined) upd.industry = clean(v.industry) || null;
   if (v.linkedinUrl !== undefined) upd.linkedinUrl = clean(v.linkedinUrl) || null;
   if (v.summary !== undefined) upd.summary = clean(v.summary) || null;
-  const REL = ["investor", "friend", "coworker", "vendor", "family", "other"];
-  if (v.relationship && REL.includes(v.relationship))
-    upd.relationship = v.relationship as typeof contacts.$inferInsert["relationship"];
+  // Relationship is now free-text (each user has their own category set), so accept any label.
+  if (v.relationship !== undefined && v.relationship.trim()) upd.relationship = v.relationship.trim().slice(0, 24);
 
   if (Object.keys(upd).length) await db.update(contacts).set(upd).where(eq(contacts.id, id));
   revalidatePath(`/dashboard/contacts/${id}`);

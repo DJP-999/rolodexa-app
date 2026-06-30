@@ -1,6 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, Mail, MapPin, ExternalLink, Briefcase, Newspaper, Activity, Users, AlertTriangle, RefreshCw } from "lucide-react";
+import { eq } from "drizzle-orm";
+import { db } from "@/db";
+import { userContext } from "@/db/schema";
 import { getContactProfile } from "@/lib/contactProfile";
 import DeleteContactButton from "../DeleteContactButton";
 import VipToggle from "../VipToggle";
@@ -10,14 +13,23 @@ import MarkReviewedButton from "./MarkReviewedButton";
 
 export const dynamic = "force-dynamic";
 
-const REL_BADGE: Record<string, string> = {
-  investor: "bg-violet-100 text-violet-700",
-  friend: "bg-rose-100 text-rose-700",
-  coworker: "bg-sky-100 text-sky-700",
-  vendor: "bg-amber-100 text-amber-700",
-  family: "bg-emerald-100 text-emerald-700",
-  other: "bg-black/[0.05] text-muted",
-};
+const BADGE_PALETTE = [
+  "bg-violet-100 text-violet-700",
+  "bg-sky-100 text-sky-700",
+  "bg-emerald-100 text-emerald-700",
+  "bg-amber-100 text-amber-700",
+  "bg-rose-100 text-rose-700",
+  "bg-indigo-100 text-indigo-700",
+  "bg-teal-100 text-teal-700",
+];
+/** Stable color for any relationship label (user categories are now free-form). */
+function relBadge(label?: string | null): string {
+  const s = (label ?? "").trim().toLowerCase();
+  if (!s || s === "other") return "bg-black/[0.05] text-muted";
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return BADGE_PALETTE[h % BADGE_PALETTE.length];
+}
 
 function fmtDate(d: Date | string | null): string {
   if (!d) return "—";
@@ -58,6 +70,10 @@ export default async function ContactProfile({ params }: { params: Promise<{ id:
   const p = await getContactProfile(id).catch(() => null);
   if (!p) notFound();
   const { contact: c, interactions: ix, claims: cls, suggestions: sug, stats, bio, related } = p;
+  const relTypes = (
+    (await db.select({ rt: userContext.relationshipTypes }).from(userContext).where(eq(userContext.userId, c.userId)).limit(1))[0]
+      ?.rt ?? []
+  ) as string[];
 
   const initials = c.name.split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
   const news = cls.filter((x) => x.field === "news" || x.field === "job_change");
@@ -127,6 +143,7 @@ export default async function ContactProfile({ params }: { params: Promise<{ id:
               relationship: c.relationship ?? "other",
               summary: c.summary ?? "",
             }}
+            categories={relTypes}
           />
           <VipToggle id={c.id} initial={!!c.highValue} />
           <DeleteContactButton id={c.id} name={c.name} />
@@ -156,7 +173,7 @@ export default async function ContactProfile({ params }: { params: Promise<{ id:
         <Stat
           label="Relationship"
           value={
-            <span className={`inline-flex rounded-md px-2 py-0.5 text-xs font-medium capitalize ${REL_BADGE[c.relationship ?? "other"]}`}>
+            <span className={`inline-flex rounded-md px-2 py-0.5 text-xs font-medium capitalize ${relBadge(c.relationship)}`}>
               {c.relationship ?? "other"}
             </span>
           }

@@ -19,6 +19,8 @@ export const userContext = pgTable("user_context", {
   userId: uuid("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
   role: text("role"), currentFocus: text("current_focus"), priorityConnections: text("priority_connections"),
   activeProjects: text("active_projects"), painPoints: jsonb("pain_points").$type<string[]>().default([]),
+  // The user's OWN relationship categories (derived from their role/focus at onboarding, editable).
+  relationshipTypes: jsonb("relationship_types").$type<string[]>(),
   timezone: text("timezone").default("America/New_York"), writingStyle: text("writing_style"), firstEnrichDone: boolean("first_enrich_done").default(false),
   writingStyleSource: text("writing_style_source").default("auto"), writingStyleSamples: integer("writing_style_samples").default(0),
   writingStyleUpdatedAt: timestamp("writing_style_updated_at", { withTimezone: true }),
@@ -47,7 +49,9 @@ export const contacts = pgTable("contacts", {
   linkedinMemberId: text("linkedin_member_id"),
   customFields: jsonb("custom_fields").$type<Record<string, string>>().default({}),
   normalizedFields: jsonb("normalized_fields").$type<Record<string, string>>().default({}),
-  relationship: relationshipCategory("relationship").default("other"),
+  // Free-text so each user can have their OWN category set (Prospect/Customer/Champion for sales,
+  // Candidate/Client for a recruiter, LP/GP for IR, etc.) — derived from their settings + comms.
+  relationship: text("relationship").default("other"),
   relevance: integer("relevance"), replyPropensity: real("reply_propensity"),
   rpFeatures: jsonb("rp_features").$type<Record<string, number>>(), rpVersion: integer("rp_version").default(1),
   status: contactStatus("status").default("active"), highValue: boolean("high_value").default(false),

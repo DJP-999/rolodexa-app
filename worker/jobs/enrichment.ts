@@ -1,6 +1,7 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { contacts, connectedAccounts, interactions, claims, suggestions, userContext } from "@/db/schema";
+import { GENERIC_RELATIONSHIP_TYPES } from "@/lib/agent/relationshipTypes";
 import { env, isConfigured } from "@/lib/env";
 import { search } from "@/lib/integrations/exa";
 import {
@@ -504,27 +505,54 @@ async function syncCalendar(userId: string, accountId: string): Promise<void> {
   console.log(`[enrichment] calendar synced ${n} meeting interaction(s)`);
 }
 
+/**
+ * Categorize contacts into the USER'S OWN relationship categories (derived from their role/focus),
+ * informed by the contact's role/firm/notes AND the recent messages between them — so the buckets
+ * fit the user's world (Prospect/Customer for sales, Candidate/Client for a recruiter, etc.) and
+ * reflect how the relationship actually plays out, not a fixed finance-centric taxonomy.
+ */
 async function categorizeUser(userId: string): Promise<void> {
   const ctx = (await db.select().from(userContext).where(eq(userContext.userId, userId)).limit(1))[0];
   const who = ctx?.role
     ? `a ${ctx.role}${ctx.currentFocus ? ` focused on ${ctx.currentFocus}` : ""}`
     : "a professional who stays close to a large network";
+  const types = ctx?.relationshipTypes?.length ? ctx.relationshipTypes : GENERIC_RELATIONSHIP_TYPES;
+  const canonical = new Map(types.map((t) => [t.toLowerCase(), t]));
+  const validLower = new Set(types.map((t) => t.toLowerCase()));
+
   const refreshed = await db.select().from(contacts).where(eq(contacts.userId, userId));
-  // Re-evaluate unset/'other' AND existing 'vendor' labels (the latter are frequently
-  // mis-tagged investment firms), but never touch the user's personal classifications.
-  const need = refreshed.filter(
-    (c) =>
-      (!c.relationship || c.relationship === "other" || c.relationship === "vendor") && (c.company || c.role),
-  );
-  const valid = new Set(["family", "friend", "coworker", "investor", "vendor", "other"]);
+  // Categorize contacts that don't yet have a CURRENT, valid label: unset, the catch-all, or a
+  // stale label from a previous category set. Contacts already in a current category are left alone.
+  const need = refreshed.filter((c) => {
+    const r = (c.relationship ?? "").toLowerCase();
+    return (!r || r === "other" || !validLower.has(r)) && (c.company || c.role);
+  });
+  if (!need.length) return;
+
+  // Recent messages per contact, so classification reflects how they ACTUALLY interact.
+  const ixRows = await db
+    .select({ contactId: interactions.contactId, direction: interactions.direction, metadata: interactions.metadata })
+    .from(interactions)
+    .where(eq(interactions.userId, userId))
+    .orderBy(desc(interactions.occurredAt))
+    .limit(20000);
+  const recentByContact = new Map<string, string[]>();
+  for (const r of ixRows) {
+    const cid = r.contactId;
+    if (!cid) continue;
+    const arr = recentByContact.get(cid) ?? [];
+    if (arr.length >= 3) continue;
+    const m = (r.metadata ?? {}) as { subject?: string; text?: string };
+    const t = (m.subject || m.text || "").toString().trim();
+    if (!t) continue;
+    arr.push(`${r.direction === "outbound" ? "you→them" : "them→you"}: ${t.slice(0, 120)}`);
+    recentByContact.set(cid, arr);
+  }
+
   for (let i = 0; i < need.length && i < 3000; i += 50) {
     const slice = need.slice(i, i + 50).map((c) => {
-      const nf = (c.normalizedFields ?? {}) as Record<string, string>;
       const cf = (c.customFields ?? {}) as Record<string, string>;
-      const ftKey = Object.keys(cf).find((k) => /firm.?type|investor.?type|\btype\b|category|strategy/i.test(k));
       const notesKey = Object.keys(cf).find((k) => /note|background|summary|description|comment|bio|about/i.test(k));
-      const pb = (c.pitchbookData ?? null) as Record<string, string> | null;
-      const firmType = nf["Firm Type"] || pb?.["Firm Type"] || (ftKey ? cf[ftKey] : "") || undefined;
       const notes = (notesKey ? cf[notesKey] : "") || c.summary || "";
       return {
         id: c.id,
@@ -532,48 +560,28 @@ async function categorizeUser(userId: string): Promise<void> {
         company: c.company,
         role: c.role,
         industry: c.industry ?? undefined,
-        firmType,
-        notes: notes ? notes.slice(0, 400) : undefined,
+        notes: notes ? notes.slice(0, 300) : undefined,
+        recent: recentByContact.get(c.id) ?? undefined,
       };
     });
     const raw = await complete({
       tier: "cheap",
       system:
-        `You categorize professional contacts for ${who}. ` +
-        "Categories: family, friend, coworker, investor, vendor, other.\n" +
-        "investor = ANY firm or person whose business is INVESTING or ALLOCATING capital: VC, growth equity, PE, " +
-        "buyout, secondaries, hedge funds, family offices, LPs, fund-of-funds, asset/wealth managers, RIAs, angels, " +
-        "sovereign/endowment/pension funds, search funds, SPVs, and holding or investment companies. Firm-name cues " +
-        "like 'Capital', 'Ventures', 'Partners', 'Holdings', 'Management', 'Advisors', 'Investments', 'Equity', " +
-        "'Asset', 'Fund', 'Group' almost always mean investor.\n" +
-        "vendor = ONLY service providers the user would PAY or buy from: law firms, accountants, fund administrators, " +
-        "recruiters, consultants, software/data vendors, PR/marketing agencies, brokerage/coverage desks.\n" +
-        "coworker = at the user's own firm. friend/family = personal ties. other = genuinely none of the above.\n" +
-        "Each contact may include 'industry', 'firmType' and 'notes' — these are AUTHORITATIVE, especially the notes (the user's " +
-        "own description of who the person is and what they do). If notes, firmType or industry describe an investing strategy or " +
-        "vehicle (VC, growth equity, PE, buyout, secondaries, hedge fund, family office, asset/wealth manager, RIA, fund-of-funds, " +
-        "holding company, SPV, angel, LP, etc.), classify as investor even if the firm's NAME gives no cue. " +
-        "Be decisive: if a firm clearly invests, choose investor. NEVER default to vendor when unsure — use 'other'. " +
-        "Return JSON only.",
-      messages: [
-        {
-          role: "user",
-          content:
-            `Assign each contact a category. Return a JSON array of {"id","category"} only.\n` +
-            JSON.stringify(slice),
-        },
-      ],
+        `You categorize professional contacts for ${who} into exactly ONE of THEIR OWN relationship categories. ` +
+        `Use these EXACT category labels, and only these: ${types.join(", ")}.\n` +
+        "Base each choice on the contact's role, company, the user's notes, and ESPECIALLY the 'recent' messages between them (how they actually interact). " +
+        "Pick the single best-fitting label. Use the catch-all (e.g. 'Other') only when none clearly fit. " +
+        'Return JSON only: an array of {"id","category"} where category is exactly one of the labels above.',
+      messages: [{ role: "user", content: `Contacts:\n${JSON.stringify(slice)}` }],
       maxTokens: 1800,
       temperature: 0,
     });
     try {
       const arr = JSON.parse(raw.match(/\[[\s\S]*\]/)?.[0] ?? "[]");
       for (const x of arr) {
-        if (x?.id && valid.has(x.category)) {
-          await db
-            .update(contacts)
-            .set({ relationship: x.category as Contact["relationship"] })
-            .where(eq(contacts.id, x.id));
+        const label = canonical.get(String(x?.category ?? "").toLowerCase());
+        if (x?.id && label) {
+          await db.update(contacts).set({ relationship: label }).where(eq(contacts.id, x.id));
         }
       }
     } catch {
