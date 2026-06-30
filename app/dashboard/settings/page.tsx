@@ -58,6 +58,7 @@ const JOB_META: [string, string, string][] = [
   ["morning-brief", "Morning brief", "7:00 AM"],
   ["midday-brief", "Midday update", "12:30 PM"],
   ["night-brief", "Night brief", "8:00 PM"],
+  ["reminders", "Send due reminders", "Every 15m"],
 ];
 
 const inputCls =

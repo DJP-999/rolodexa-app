@@ -16,6 +16,7 @@ import { runMessageBackfill } from "./jobs/messageBackfill";
 import { runRecompute } from "./jobs/recompute";
 import { runFitGrade } from "./jobs/fitGrade";
 import { runPersonalProfile } from "./jobs/personalProfile";
+import { runRemindersDue } from "./jobs/remindersDue";
 import { runSplitContacts } from "./jobs/splitContacts";
 import { runPitchbookSync } from "./jobs/pitchbookSync";
 import { runSuggestions } from "./jobs/suggestions";
@@ -37,6 +38,7 @@ type JobDef = { name: string; cron: string; run: () => Promise<void> };
 
 export const JOBS: JobDef[] = [
   { name: "email-poll", cron: "*/30 * * * *", run: runEmailPoll },
+  { name: "reminders", cron: "*/15 * * * *", run: runRemindersDue },
   { name: "linkedin-poll", cron: "15,45 * * * *", run: runLinkedinPoll },
   { name: "meetings-sync", cron: "5 */2 * * *", run: runMeetingsSync },
   { name: "message-backfill", cron: "0 5 * * *", run: runMessageBackfill },

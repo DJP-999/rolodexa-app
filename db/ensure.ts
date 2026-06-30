@@ -164,6 +164,19 @@ export async function ensureSchema(sql: {
   await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "grades_locked" boolean DEFAULT false`);
   // Personal knowledge layer (alma maters, city, work anniversary, birthday, interests).
   await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "personal_profile" jsonb`);
+  // Follow-up reminders captured from the Telegram chat.
+  await sql.unsafe(`CREATE TABLE IF NOT EXISTS "reminders" (
+    "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    "user_id" uuid NOT NULL,
+    "contact_id" uuid,
+    "contact_name" text,
+    "note" text NOT NULL,
+    "due_at" timestamptz NOT NULL,
+    "status" text DEFAULT 'pending',
+    "created_at" timestamptz NOT NULL DEFAULT now(),
+    "sent_at" timestamptz
+  )`);
+  await sql.unsafe(`CREATE INDEX IF NOT EXISTS "reminders_status_due_idx" ON "reminders" ("status","due_at")`);
   // New personal-touch trigger types (ADD VALUE is idempotent + must run outside a txn).
   for (const v of ["work_anniversary", "birthday", "personal_event"]) {
     await sql.unsafe(`ALTER TYPE "trigger_type" ADD VALUE IF NOT EXISTS '${v}'`);

@@ -128,9 +128,14 @@ function sameSchool(a: string, b: string): boolean {
   return x === y || x.includes(y) || y.includes(x);
 }
 
+// Sports nudges are HIGHLY time-sensitive: only worth sending while the game/series is live, or
+// within a short tail after it concludes. `window.end` is the conclusion date (the deciding game);
+// we allow at most GRACE_DAYS after that, then it's stale and never fires.
+const GRACE_DAYS = 3;
+
 function active(e: SportsEvent, now: Date): boolean {
   const s = new Date(e.window.start).getTime();
-  const en = new Date(e.window.end).getTime();
+  const en = new Date(e.window.end).getTime() + GRACE_DAYS * 86_400_000;
   const t = now.getTime();
   return t >= s && t <= en;
 }

@@ -172,6 +172,19 @@ export const suggestions = pgTable("suggestions", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 }, (t) => ({ userStatus: index("suggestions_user_status_idx").on(t.userId, t.status) }));
+// User-set follow-up reminders ("remind me early next week to touch base with John Corley").
+// Telegram-as-notebook: captured from chat, fired back as a Telegram nudge at the due time.
+export const reminders = pgTable("reminders", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  contactId: uuid("contact_id").references(() => contacts.id, { onDelete: "set null" }),
+  contactName: text("contact_name"), // the named person, even if unresolved to a contact
+  note: text("note").notNull(), // what to do, e.g. "follow up to get a meeting scheduled"
+  dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
+  status: text("status").default("pending"), // pending | sent | done | cancelled
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  sentAt: timestamp("sent_at", { withTimezone: true }),
+}, (t) => ({ dueIdx: index("reminders_status_due_idx").on(t.status, t.dueAt) }));
 export const notificationEvents = pgTable("notification_events", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),

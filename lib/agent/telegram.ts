@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { contacts, suggestions, userContext } from "@/db/schema";
+import { contacts, reminders, suggestions, userContext } from "@/db/schema";
 import { answerCallback, finishCard, sendMessage, type ApprovalButton } from "@/lib/integrations/telegram";
 import { resolveChannel } from "@/lib/outreach/deliver";
 import { SNOOZE_DAYS } from "@/lib/outreach/suppress";
@@ -173,6 +173,90 @@ export async function handleContactAction(
   await answerCallback(callbackId, "Got it ✓");
 }
 
+// ---- Reminders (Telegram as a follow-up notebook) ------------------------------------------
+
+/** Loose gate so we only spend an LLM call when the message smells like a reminder. */
+function looksLikeReminder(t: string): boolean {
+  return /\bremind me\b|\bset a reminder\b|\breminder to\b|\bnote to self\b|\bdon'?t let me forget\b|\bfollow ?up with\b/i.test(
+    t,
+  );
+}
+
+/**
+ * Turn a free-text note into a stored reminder ("remind me early next week to touch base with
+ * John Corley and get a meeting scheduled"). Resolves relative dates + the named contact, persists
+ * it, and confirms. Returns false if it doesn't parse as a reminder so the caller can fall through.
+ */
+async function parseAndCreateReminder(userId: string, chatId: string, t: string): Promise<boolean> {
+  const now = new Date();
+  const raw = await complete({
+    tier: "cheap",
+    system:
+      "You turn a user's message into a follow-up REMINDER. Return JSON only: " +
+      `{"isReminder": boolean, "note": "short imperative of what to do", "contactName": string|null, "dueAt": "ISO 8601 datetime"}. ` +
+      "Resolve relative times against the current time, in US Eastern: 'early next week' = next Monday 9:00am; 'next week' = next Monday 9am; 'tomorrow' = tomorrow 9am; 'tonight' = today 7pm; 'in an hour' = +1 hour; a weekday name = the next such day at 9am. If no time is stated, use tomorrow 9am. Set isReminder=false only if this clearly is NOT a reminder/follow-up request.",
+    messages: [{ role: "user", content: `Current time: ${now.toISOString()} (US Eastern context). Message: ${t}` }],
+    maxTokens: 220,
+    temperature: 0,
+  });
+  let parsed: { isReminder?: boolean; note?: string; contactName?: string | null; dueAt?: string };
+  try {
+    parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] ?? "{}");
+  } catch {
+    return false;
+  }
+  if (!parsed.isReminder || !parsed.note || !parsed.dueAt) return false;
+  const due = new Date(parsed.dueAt);
+  if (isNaN(due.getTime())) return false;
+
+  const contact = parsed.contactName ? await resolveContactByName(userId, parsed.contactName) : null;
+  await db.insert(reminders).values({
+    userId,
+    contactId: contact?.id ?? null,
+    contactName: parsed.contactName ?? contact?.name ?? null,
+    note: parsed.note.slice(0, 300),
+    dueAt: due,
+  });
+  const whenStr = due.toLocaleString("en-US", {
+    weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/New_York",
+  });
+  const who = contact ? ` with ${contact.name}` : parsed.contactName ? ` with ${parsed.contactName}` : "";
+  await sendMessage(chatId, `📌 Got it. I'll remind you ${whenStr} to ${parsed.note}${who}.`, undefined, { plain: true });
+  return true;
+}
+
+/** Handle a tap on a reminder card (✅ Done / ⏰ Tomorrow). */
+export async function handleReminderAction(
+  userId: string,
+  action: string,
+  reminderId: string,
+  chatId: string,
+  callbackId: string,
+  messageId?: number,
+  origText = "",
+): Promise<void> {
+  const r = (
+    await db.select().from(reminders).where(and(eq(reminders.id, reminderId), eq(reminders.userId, userId))).limit(1)
+  )[0];
+  if (!r) {
+    await answerCallback(callbackId, "That reminder is no longer available.");
+    return;
+  }
+  if (action === "rmsnooze") {
+    await db
+      .update(reminders)
+      .set({ status: "pending", dueAt: new Date(Date.now() + 86_400_000), sentAt: null })
+      .where(eq(reminders.id, r.id));
+    await answerCallback(callbackId, "I'll remind you again tomorrow ⏰");
+    await finishCard(chatId, messageId, origText, "⏰ Snoozed to tomorrow");
+    return;
+  }
+  // default: done
+  await db.update(reminders).set({ status: "done" }).where(eq(reminders.id, r.id));
+  await answerCallback(callbackId, "Marked done ✓");
+  await finishCard(chatId, messageId, origText, "✅ Done");
+}
+
 // ---- Free-text conversation + commands -----------------------------------------------------
 
 type Command = { verb: "reach" | "snooze" | "dismiss" | "block"; name: string };
@@ -266,6 +350,12 @@ export async function handleDexaText(userId: string, chatId: string, text: strin
           : `Blocked ${c.name} — no more updates 🚫`;
     await sendMessage(chatId, note, undefined, { plain: true });
     return;
+  }
+
+  // 1.5) Reminder / note-to-self ("remind me early next week to follow up with John Corley").
+  if (looksLikeReminder(t)) {
+    const ok = await parseAndCreateReminder(userId, chatId, t);
+    if (ok) return;
   }
 
   // 2) "Who should I reach out to" → actionable cards.
