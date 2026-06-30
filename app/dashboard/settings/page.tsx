@@ -313,7 +313,7 @@ export default async function SettingsPage({
 
       <Section
         title="Your context"
-        desc="The biggest driver of who Rolodexa surfaces — it re-grades your whole network on save."
+        desc="The biggest driver of who Rolodexa surfaces. You'll rarely change this — when you do, your network re-ranks on the nightly grading pass, or instantly via 'Score domain fit → Run Now' below."
       >
         <form action={saveContextAction} className="space-y-4">
           <label className="block">
@@ -379,7 +379,7 @@ export default async function SettingsPage({
             <span className="mt-1 block text-xs text-muted">Morning brief and notifications use this timezone.</span>
           </label>
           <div className="flex items-center justify-end gap-3">
-            <span className="text-xs text-muted">Saving re-grades your whole network on your new context.</span>
+            <span className="text-xs text-muted">If your focus changed, your network re-ranks on the next grading pass (or run &ldquo;Score domain fit&rdquo; now to apply immediately).</span>
             <SaveButton>Save context</SaveButton>
           </div>
         </form>
