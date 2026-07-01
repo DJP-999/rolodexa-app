@@ -54,6 +54,17 @@ const schema = z.object({
   // Max NEW firms to web-research per fit-grade run (cached firms are free). Bounds Exa+LLM
   // cost; coverage converges across runs as the per-firm cache fills. Investors first.
   FIRM_RESEARCH_CAP: z.coerce.number().default(300),
+  // FIRM-centric news sweep: firms per run (3 runs/day → ~120 firms/day; a 250-firm rolodex is
+  // fully covered every ~2 days), and how far back an event may date to count as fresh news.
+  FIRM_NEWS_BATCH: z.coerce.number().default(40),
+  FIRM_NEWS_WINDOW_DAYS: z.coerce.number().default(10),
+  // How many contacts at one firm get a claim fanned out per news item (top by VIP/relevance) —
+  // bounds the draft cost when a mega-firm (50 contacts) closes a fund.
+  FIRM_NEWS_FANOUT: z.coerce.number().default(5),
+  // LinkedIn POSTS sweep: profiles per run (2 runs/day) and the post-recency window. Kept
+  // conservative to respect LinkedIn/Unipile account-level limits, separate from profile lookups.
+  LI_POSTS_PER_RUN: z.coerce.number().default(60),
+  LI_POSTS_WINDOW_DAYS: z.coerce.number().default(14),
   // Incremental grading: a contact is re-graded only when something changed (new/never graded,
   // model or prompt changed, MOVED FIRMS, freshly enriched) or after this many days as a refresh.
   FIT_REGRADE_DAYS: z.coerce.number().default(60),

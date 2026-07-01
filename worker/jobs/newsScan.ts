@@ -82,7 +82,10 @@ export async function runNewsScan(): Promise<void> {
       .where(inArray(contacts.id, batch.map((c) => c.id)));
   }
 
-  // 2) Convert any new claims into ranked suggestions (deduped inside).
+  // 2) Convert any new claims into ranked suggestions (deduped inside). This also picks up
+  // whatever the firm-news sweep and the LinkedIn-posts monitor wrote since the last scan
+  // (both are scheduled ahead of each scan), so their signals ride this same conversion +
+  // breaking-ping pass.
   await runSuggestions();
 
   // 3) Breaking pings for the rare must-know item.

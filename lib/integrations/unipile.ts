@@ -195,6 +195,65 @@ export async function sendLinkedInMessage(
   }
 }
 
+/** A LinkedIn post as returned by Unipile's list-posts route, normalized defensively. */
+export type LinkedInPost = {
+  id: string;
+  socialId: string | null;
+  text: string;
+  url: string | null;
+  postedAt: string | null; // ISO datetime (parsed_datetime)
+  isRepost: boolean;
+  reactions: number;
+  comments: number;
+};
+
+/**
+ * Recent posts authored by a user (or company) — the contact's public LinkedIn ACTIVITY.
+ * GET /api/v1/users/{identifier}/posts. The SDK doesn't wrap it, so we call REST directly
+ * (same approach as calendars). `identifier` = provider/member id or public slug.
+ */
+export async function getUserPosts(
+  accountId: string,
+  identifier: string,
+  limit = 10,
+): Promise<LinkedInPost[]> {
+  if (!isConfigured("unipile")) return [];
+  try {
+    const url = new URL(`${dsnBase()}/api/v1/users/${encodeURIComponent(identifier)}/posts`);
+    url.searchParams.set("account_id", accountId);
+    url.searchParams.set("limit", String(Math.min(Math.max(limit, 1), 50)));
+    const res = await fetch(url, {
+      headers: { "X-API-KEY": env.UNIPILE_API_KEY!, accept: "application/json" },
+    });
+    if (!res.ok) {
+      console.error(`[unipile] getUserPosts(${identifier}) → ${res.status}`);
+      return [];
+    }
+    const data: any = await res.json();
+    const items: any[] = data?.items ?? data?.data ?? (Array.isArray(data) ? data : []);
+    return items
+      .map((p: any): LinkedInPost | null => {
+        const id = p?.id != null ? String(p.id) : null;
+        const text = typeof p?.text === "string" ? p.text.trim() : "";
+        if (!id || !text) return null;
+        return {
+          id,
+          socialId: p?.social_id ? String(p.social_id) : null,
+          text,
+          url: typeof p?.share_url === "string" ? p.share_url : null,
+          postedAt: typeof p?.parsed_datetime === "string" ? p.parsed_datetime : null,
+          isRepost: Boolean(p?.is_repost),
+          reactions: typeof p?.reaction_counter === "number" ? p.reaction_counter : 0,
+          comments: typeof p?.comment_counter === "number" ? p.comment_counter : 0,
+        };
+      })
+      .filter((p): p is LinkedInPost => p !== null);
+  } catch (e) {
+    console.error("[unipile] getUserPosts", e);
+    return [];
+  }
+}
+
 /** Send an email from a connected mailbox. Returns true only on success. */
 export async function sendEmail(
   accountId: string,

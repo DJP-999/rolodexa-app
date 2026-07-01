@@ -693,7 +693,11 @@ function selectPriority(glist: Contact[], limit: number): Contact[] {
   return [...vips, ...rest].filter((c) => (seen.has(c.id) ? false : (seen.add(c.id), true)));
 }
 
-/** Web (Exa) public-milestone pass: validated, dated, sourced news claims for priority contacts. */
+/**
+ * Web (Exa) public-milestone pass: validated, dated, sourced news claims for priority contacts.
+ * PERSON-level only — firm-level coverage moved to the firm-centric engine
+ * (lib/research/firmNews.ts), which searches each FIRM once instead of once per contact.
+ */
 export async function webNewsPass(glist: Contact[], windowDays: number, limit = 25): Promise<void> {
   if (!isConfigured("exa")) return;
   const startDate = new Date(Date.now() - windowDays * 86_400_000).toISOString().slice(0, 10);
@@ -701,21 +705,11 @@ export async function webNewsPass(glist: Contact[], windowDays: number, limit = 
   for (const c of priority) {
     // Quote the firm so Exa weights the exact phrase, not a shared first word.
     const firmQ = c.company ? `"${c.company}" ` : "";
-    // Two passes: (1) the PERSON's own milestones, and (2) the FIRM's deal/fundraise news on
-    // its own — private-markets contacts rarely make the press by name, but their firms do
-    // (fund closes, new investments, acquisitions), and that's directly relevant to them.
-    const queries = [`${firmQ}${c.name} funding OR appointed OR promoted OR award OR launches`];
-    if (c.company) {
-      queries.push(
-        `"${c.company}" (raises OR closes OR fund OR fundraise OR investment OR invests OR acquires OR acquisition OR backs OR "leads round" OR "Series" OR portfolio OR IPO OR exit)`,
-      );
-    }
-    const seen = new Set<string>();
-    const results: { title?: string; url: string; publishedDate?: string; text?: string; highlights?: string[] }[] = [];
-    for (const q of queries) {
-      const hits = await search({ query: q, startPublishedDate: startDate, numResults: 5 });
-      for (const r of hits) if (r.url && !seen.has(r.url)) (seen.add(r.url), results.push(r));
-    }
+    const results = await search({
+      query: `${firmQ}${c.name} funding OR appointed OR promoted OR award OR launches`,
+      startPublishedDate: startDate,
+      numResults: 5,
+    });
     const validated = await extractNews(c, results, windowDays);
     for (const v of validated) {
       await writeClaim({

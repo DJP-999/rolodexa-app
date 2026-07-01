@@ -23,6 +23,9 @@ import { runPitchbookSync } from "./jobs/pitchbookSync";
 import { runSuggestions } from "./jobs/suggestions";
 import { runBrief } from "./jobs/brief";
 import { runNewsScan } from "./jobs/newsScan";
+import { runFirmNews } from "./jobs/firmNews";
+import { runLinkedInActivity } from "./jobs/linkedinActivity";
+import { runSportsSync } from "./jobs/sportsSync";
 import { runNormalize } from "./jobs/normalize";
 import { runAutomation } from "./jobs/automation";
 
@@ -61,6 +64,15 @@ export const JOBS: JobDef[] = [
   { name: "night-brief", cron: "0 20 * * *", run: () => runBrief("night-brief") },
   // Intraday news sweep of top relationships + breaking pings, between the briefs.
   { name: "news-scan", cron: "0 10,15,18 * * *", run: runNewsScan },
+  // FIRM-centric news engine: one search per firm, rotated across the whole firm universe.
+  // Runs 30 min before each news-scan so fresh firm claims ride that scan's conversion pass.
+  { name: "firm-news", cron: "30 9,14,17 * * *", run: runFirmNews },
+  // What contacts are POSTING on LinkedIn — the warmest outreach trigger there is. Twice a
+  // day, ahead of the 10a/6p scans; conservative caps respect account-level limits.
+  { name: "linkedin-activity", cron: "30 8,16 * * *", run: runLinkedInActivity },
+  // Self-maintaining sports calendar (live playoff moments + participants, from sourced web
+  // results) so alma-mater / hometown-team nudges actually fire. Twice a week is plenty.
+  { name: "sports-sync", cron: "15 6 * * 1,4", run: runSportsSync },
 ];
 
 export const byName = new Map(JOBS.map((j) => [j.name, j.run]));

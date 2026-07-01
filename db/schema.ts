@@ -58,6 +58,8 @@ export const contacts = pgTable("contacts", {
   importPriority: real("import_priority"), lastContactedAt: timestamp("last_contacted_at", { withTimezone: true }),
   enrichedAt: timestamp("enriched_at", { withTimezone: true }), gradedAt: timestamp("graded_at", { withTimezone: true }),
   lastNewsCheckAt: timestamp("last_news_check_at", { withTimezone: true }),
+  // Rotation cursor for the LinkedIn-posts sweep (worker/jobs/linkedinActivity.ts).
+  lastPostsCheckAt: timestamp("last_posts_check_at", { withTimezone: true }),
   gradeRationale: text("grade_rationale"), summary: text("summary"), professionalFit: real("professional_fit"), profileData: jsonb("profile_data").$type<Record<string, unknown>>(), embedding: vector("embedding", { dimensions: 1536 }),
   // The PERSONAL knowledge layer — what makes outreach feel like a friend, not a CRM: alma maters,
   // city/hometown, current-role start (work anniversary), birthday, and interests/causes. Powers
@@ -122,6 +124,49 @@ export const firmResearch = pgTable("firm_research", {
   nameKey: text("name_key").notNull().unique(), // normalized firm name
   name: text("name").notNull(),
   summary: text("summary"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+// FIRM-CENTRIC news tracking. firm_watch is the rotation ledger (one row per distinct firm that
+// is relevant to some user's goals; global like firm_research, since firm news is objective +
+// shared). firm_news stores every validated, dated, sourced item so the firms that matter are
+// constantly tracked — items fan out to contacts as claims, and the table doubles as a per-firm
+// intel timeline.
+export const firmWatch = pgTable("firm_watch", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  nameKey: text("name_key").notNull().unique(), // normalized firm name (lib/research/firm.ts firmKey)
+  name: text("name").notNull(),
+  newsCheckedAt: timestamp("news_checked_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+export const firmNews = pgTable("firm_news", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  nameKey: text("name_key").notNull(),
+  name: text("name").notNull(),
+  headline: text("headline").notNull(), // one factual sentence, names the firm
+  // fund_close | new_investment | acquisition | exit_ipo | expansion | leadership | other —
+  // lets outreach be angle-aware (a fund close = fresh dry powder ≠ an office opening).
+  category: text("category"),
+  url: text("url").notNull(),
+  eventDate: date("event_date"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({
+  fnKeyIdx: index("firm_news_key_idx").on(t.nameKey),
+  fnUq: uniqueIndex("firm_news_uq").on(t.nameKey, t.url),
+}));
+// Self-maintaining sports calendar (replaces the hand-curated empty list that never fired).
+// Populated twice a week by worker/jobs/sportsSync.ts from sourced web results; read alongside
+// the curated fallback in lib/personal/sportsEvents.ts.
+export const sportsEventsTable = pgTable("sports_events", {
+  id: text("id").primaryKey(), // e.g. "nba-finals-2026"
+  label: text("label").notNull(), // "NBA Finals"
+  blurb: text("blurb").notNull(), // "the NBA Finals"
+  league: text("league").notNull(), // NBA | NFL | MLB | NHL | NCAAM | NCAAF
+  season: integer("season").notNull(),
+  windowStart: date("window_start").notNull(),
+  windowEnd: date("window_end").notNull(),
+  schools: jsonb("schools").$type<string[]>().default([]),
+  teams: jsonb("teams").$type<string[]>().default([]),
+  sourceUrl: text("source_url"),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 export const claims = pgTable("claims", {

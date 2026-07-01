@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { userContext } from "@/db/schema";
 import { getContactProfile } from "@/lib/contactProfile";
+import { newsForFirm } from "@/lib/research/firmNews";
 import DeleteContactButton from "../DeleteContactButton";
 import VipToggle from "../VipToggle";
 import GradeEditor from "../GradeEditor";
@@ -76,7 +77,20 @@ export default async function ContactProfile({ params }: { params: Promise<{ id:
   ) as string[];
 
   const initials = c.name.split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
-  const news = cls.filter((x) => x.field === "news" || x.field === "job_change");
+  const news = cls.filter((x) => ["news", "job_change", "li_post", "x_post"].includes(x.field));
+  // The firm's own tracked timeline (firm-news engine) — shown even when items weren't fanned
+  // out to this specific contact, so the page reflects everything Dexa knows about their firm.
+  const firmIntel = c.company ? await newsForFirm(c.company, 6).catch(() => []) : [];
+  const CAT_LABEL: Record<string, string> = {
+    funding: "Funding",
+    deal: "Deal",
+    launch: "Launch",
+    partnership: "Partnership",
+    expansion: "Expansion",
+    leadership: "Leadership",
+    setback: "Setback",
+    other: "News",
+  };
   const rp = (c.rpFeatures ?? {}) as Record<string, number>;
   const prof = (c.profileData ?? null) as {
     experience?: {
@@ -433,6 +447,31 @@ export default async function ContactProfile({ params }: { params: Promise<{ id:
                     source
                   </a>
                 )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Firm intel — everything Dexa is tracking about their organization */}
+      {firmIntel.length > 0 && (
+        <div className="mt-5 rounded-2xl border border-hairline bg-white p-5">
+          <h2 className="flex items-center gap-2 text-sm font-semibold">
+            <Briefcase className="h-4 w-4 text-muted" /> Firm intel — {c.company}
+          </h2>
+          <ul className="mt-3 space-y-2">
+            {firmIntel.map((n) => (
+              <li key={n.id} className="flex items-start gap-2 text-sm">
+                <span className="mt-0.5 shrink-0 rounded-full bg-black/[0.05] px-2 py-0.5 text-[11px] font-medium text-muted">
+                  {CAT_LABEL[n.category ?? "other"] ?? "News"}
+                </span>
+                <span>
+                  <span className="text-ink">{n.headline}</span>{" "}
+                  {n.eventDate && <span className="text-xs text-muted">· {fmtDate(n.eventDate)}</span>}{" "}
+                  <a href={n.url} target="_blank" rel="noreferrer" className="text-xs text-[#2d6cf6] hover:underline">
+                    source
+                  </a>
+                </span>
               </li>
             ))}
           </ul>

@@ -1,6 +1,6 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { claims, contacts, suggestions, userContext } from "@/db/schema";
+import { claims, contacts, sportsEventsTable, suggestions, userContext } from "@/db/schema";
 import { cadenceForRelevance } from "@/lib/scoring/relevance";
 import { outreachSuppressed } from "@/lib/outreach/suppress";
 import { isNews } from "@/lib/provenance/claims";
@@ -8,7 +8,7 @@ import { mentionsContact } from "@/lib/match/entity";
 import { complete } from "@/lib/llm";
 import { TONE_GUIDE, stripEmDashes } from "@/lib/agent/tone";
 import { getWritingStyleFor } from "@/lib/agent/style";
-import { matchSportsMoment } from "@/lib/personal/sportsEvents";
+import { matchSportsMoment, activeEvent, type SportsEvent } from "@/lib/personal/sportsEvents";
 
 // Genuine, well-timed REASONS rank highest; the bare "it's been a while" timer is demoted to a
 // last resort (0.35) so it only surfaces when nothing better exists — and even then it carries a
@@ -74,6 +74,10 @@ function personalContextOf(c: { personalProfile?: unknown; location?: string | n
 const COLD_FIRST_TOUCH_FLOOR = 45;
 const MAX_COLD_FIRST_TOUCH_PER_RUN = 30;
 const MAX_JOB_MOVE_PER_RUN = 25; // bound the goal-aware job-change drafts per run (cost)
+// The firm-news engine fans one item out to several contacts, so a big sweep can surface many
+// fresh claims at once; cap the news/milestone drafts per run so an LLM-cost burst is impossible.
+// Contacts iterate best-relevance-first, so the cap always spends on the most valuable people.
+const MAX_NEWS_DRAFT_PER_RUN = 40;
 
 /** Detects placeholder/meta leaks like "[recent news]" or "Note: ... rewrite it". */
 function hasLeak(s: string): boolean {
@@ -257,6 +261,28 @@ export async function runSuggestions(): Promise<void> {
   let created = 0;
   let coldCreated = 0;
   let jobMoveCreated = 0;
+  let newsCreated = 0;
+
+  // Live sports calendar (auto-synced from the web by sportsSync) + the curated fallback.
+  let liveSports: SportsEvent[] = [];
+  try {
+    liveSports = (await db.select().from(sportsEventsTable))
+      .map(
+        (e): SportsEvent => ({
+          id: e.id,
+          label: e.label,
+          blurb: e.blurb,
+          league: e.league as SportsEvent["league"],
+          season: e.season,
+          window: { start: e.windowStart, end: e.windowEnd },
+          schools: e.schools ?? [],
+          teams: e.teams ?? [],
+        }),
+      )
+      .filter((e) => activeEvent(e));
+  } catch (e) {
+    console.error("[suggestions] sports calendar load failed", e);
+  }
 
   // Heal: a milestone suggestion must point to a live, sourced claim. Dismiss any whose
   // claims no longer exist (e.g. orphaned by an earlier purge) so we never show a "Why now"
@@ -376,7 +402,7 @@ export async function runSuggestions(): Promise<void> {
     // Sports moment — alma mater in the tournament, or their city's team in the playoffs. The
     // angle matters: their HOMETOWN team is true allegiance; their CURRENT-city team is the
     // playful "are you converting?" angle (they may root for somewhere they grew up).
-    const sports = pp ? matchSportsMoment(pp) : null;
+    const sports = pp ? matchSportsMoment(pp, new Date(), liveSports) : null;
     if (
       sports &&
       !outreachSuppressed(c, true).suppressed &&
@@ -451,18 +477,23 @@ export async function runSuggestions(): Promise<void> {
       }
     }
 
-    // --- News / job-change: a fresh, dated, sourced moment (still allowed after a dismiss) ---
+    // --- News / job-change / their own posts: a fresh, dated, sourced moment (still allowed
+    //     after a dismiss). Bounded per run so a big firm-news sweep can't cause a draft burst. ---
     if (newsMuted) continue;
     const cl = await db.select().from(claims).where(eq(claims.contactId, c.id));
     const fresh = cl
       .filter((x) => isNews(x))
       // Web 'news' claims must verifiably reference this contact's firm/name — drops
       // mismatched items (e.g. an "Ion Video" article stored against an "Ion Pacific"
-      // contact). job_change (LinkedIn) and x_post (verified handle) are trusted.
+      // contact). job_change (LinkedIn), li_post (their own profile's posts), and
+      // x_post (verified handle) are trusted.
       .filter((x) => x.field !== "news" || mentionsContact(c, `${x.value} ${x.sourceUrl ?? ""}`));
-    if (fresh.length) {
+    if (fresh.length && newsCreated < MAX_NEWS_DRAFT_PER_RUN) {
+      // Their own LinkedIn post outranks third-party firm coverage: it's what THEY chose to
+      // say publicly, so reacting to it is the most personal possible opener.
       const chosen =
         fresh.find((x) => x.field === "job_change") ??
+        fresh.find((x) => x.field === "li_post") ??
         fresh.find((x) => x.field === "news") ??
         fresh.find((x) => x.field === "x_post");
       if (chosen) {
@@ -483,9 +514,11 @@ export async function runSuggestions(): Promise<void> {
             trigger:
               trigger === "job_change"
                 ? "They recently changed roles; congratulate them warmly."
-                : chosen.field === "x_post"
-                  ? "They just posted something notable on X; react to it naturally."
-                  : "Something noteworthy just happened for them; acknowledge it.",
+                : chosen.field === "li_post"
+                  ? "They just posted this on LinkedIn. React to the SUBSTANCE of what they said the way a peer who knows them would: specific and warm, one beat on their point (never a generic compliment on their work), then a natural 'let's catch up soon'."
+                  : chosen.field === "x_post"
+                    ? "They just posted something notable on X; react to it naturally."
+                    : "Something noteworthy just happened for them. If the news is about their ORGANIZATION (funding, a deal or acquisition, a launch, a partnership, an expansion), congratulate the momentum — they work there and feel it — and let it open a catch-up; never pitch anything. If it's a SETBACK (layoffs, closure, losses), check in with genuine support instead — never congratulate.",
             fact: chosen.value,
             focus: cx.focus,
             style: cx.style,
@@ -499,14 +532,17 @@ export async function runSuggestions(): Promise<void> {
             intentLabel:
               trigger === "job_change"
                 ? "Congratulate on the move"
-                : chosen.field === "x_post"
-                  ? "React to their X post"
-                  : "Acknowledge recent news",
+                : chosen.field === "li_post"
+                  ? "React to their LinkedIn post"
+                  : chosen.field === "x_post"
+                    ? "React to their X post"
+                    : "Acknowledge firm/personal news",
             priority: priorityOf(score),
             score,
             claimIds: fresh.map((f) => f.id),
           });
           created++;
+          newsCreated++;
         }
       }
     }
@@ -552,5 +588,7 @@ export async function runSuggestions(): Promise<void> {
       }
     }
   }
-  console.log(`[suggestions] created ${created} suggestions (${jobMoveCreated} job moves)`);
+  console.log(
+    `[suggestions] created ${created} suggestions (${jobMoveCreated} job moves, ${newsCreated} news/posts)`,
+  );
 }

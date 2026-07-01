@@ -133,7 +133,7 @@ function sameSchool(a: string, b: string): boolean {
 // we allow at most GRACE_DAYS after that, then it's stale and never fires.
 const GRACE_DAYS = 3;
 
-function active(e: SportsEvent, now: Date): boolean {
+export function activeEvent(e: SportsEvent, now: Date = new Date()): boolean {
   const s = new Date(e.window.start).getTime();
   const en = new Date(e.window.end).getTime() + GRACE_DAYS * 86_400_000;
   const t = now.getTime();
@@ -150,12 +150,18 @@ export type SportsHook = {
 /**
  * The single best sports hook for a contact right now, or null. Preference order matches genuine
  * allegiance: their alma mater > their hometown team > their adopted (current-city) team.
+ * `extraEvents` lets callers pass the DB-synced live calendar (worker/jobs/sportsSync.ts) so the
+ * engine no longer depends on hand-editing this file; the curated list stays as a fallback.
  */
 export function matchSportsMoment(
   p: { schools?: string[]; hometown?: string | null; currentCity?: string | null },
   now: Date = new Date(),
+  extraEvents: SportsEvent[] = [],
 ): SportsHook | null {
-  const events = SPORTS_EVENTS.filter((e) => active(e, now));
+  const seen = new Set<string>();
+  const events = [...extraEvents, ...SPORTS_EVENTS]
+    .filter((e) => (seen.has(e.id) ? false : (seen.add(e.id), true)))
+    .filter((e) => activeEvent(e, now));
   if (!events.length) return null;
 
   // 1) Alma mater in a college event — the strongest, most personal hook.

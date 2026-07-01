@@ -203,5 +203,41 @@ export async function ensureSchema(sql: {
   for (const v of ["work_anniversary", "birthday", "personal_event", "reply", "follow_up", "going_cold"]) {
     await sql.unsafe(`ALTER TYPE "trigger_type" ADD VALUE IF NOT EXISTS '${v}'`);
   }
+  // FIRM-CENTRIC news engine: rotation ledger + validated per-firm news items.
+  await sql.unsafe(`CREATE TABLE IF NOT EXISTS "firm_watch" (
+    "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    "name_key" text NOT NULL UNIQUE,
+    "name" text NOT NULL,
+    "news_checked_at" timestamptz,
+    "created_at" timestamptz NOT NULL DEFAULT now()
+  )`);
+  await sql.unsafe(`CREATE TABLE IF NOT EXISTS "firm_news" (
+    "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    "name_key" text NOT NULL,
+    "name" text NOT NULL,
+    "headline" text NOT NULL,
+    "category" text,
+    "url" text NOT NULL,
+    "event_date" date,
+    "created_at" timestamptz NOT NULL DEFAULT now()
+  )`);
+  await sql.unsafe(`CREATE INDEX IF NOT EXISTS "firm_news_key_idx" ON "firm_news" ("name_key")`);
+  await sql.unsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "firm_news_uq" ON "firm_news" ("name_key","url")`);
+  // Rotation cursor for the LinkedIn-posts sweep.
+  await sql.unsafe(`ALTER TABLE "contacts" ADD COLUMN IF NOT EXISTS "last_posts_check_at" timestamptz`);
+  // Self-maintaining sports calendar (auto-populated from sourced web results).
+  await sql.unsafe(`CREATE TABLE IF NOT EXISTS "sports_events" (
+    "id" text PRIMARY KEY,
+    "label" text NOT NULL,
+    "blurb" text NOT NULL,
+    "league" text NOT NULL,
+    "season" integer NOT NULL,
+    "window_start" date NOT NULL,
+    "window_end" date NOT NULL,
+    "schools" jsonb DEFAULT '[]'::jsonb,
+    "teams" jsonb DEFAULT '[]'::jsonb,
+    "source_url" text,
+    "updated_at" timestamptz NOT NULL DEFAULT now()
+  )`);
   console.log("[db] ensureSchema applied.");
 }
