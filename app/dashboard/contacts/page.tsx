@@ -85,6 +85,50 @@ function days(d: Date | null): string {
   return String(Math.floor((Date.now() - new Date(d).getTime()) / 86_400_000));
 }
 
+/** Title-case a label but preserve short all-caps tokens (LP, VC, CEO). */
+function prettyCat(s: string): string {
+  return s
+    .trim()
+    .split(/\s+/)
+    .map((w) => (/^[A-Z]{2,4}$/.test(w) ? w : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()))
+    .join(" ");
+}
+
+/**
+ * The relationship tabs come from the categories ACTUALLY assigned to this user's contacts —
+ * ordered by how many contacts carry each — so the tabs always mirror the real rolodex. Any
+ * user-defined type from settings that has no contacts yet is appended so it's still selectable.
+ * "Other" is pushed to the end.
+ */
+function deriveCategories(
+  all: { relationship: string | null }[] | null,
+  settingsTypes: string[],
+): string[] {
+  const counts = new Map<string, { label: string; n: number }>();
+  for (const c of all ?? []) {
+    // Match the filter's behavior: an unset relationship falls under "Other" so those
+    // contacts stay reachable via a tab.
+    const raw = (c.relationship ?? "").trim() || "Other";
+    const key = raw.toLowerCase();
+    const hit = counts.get(key);
+    if (hit) hit.n++;
+    else counts.set(key, { label: prettyCat(raw), n: 1 });
+  }
+  const ordered = [...counts.values()].sort((a, b) => b.n - a.n).map((x) => x.label);
+  const seen = new Set(ordered.map((l) => l.toLowerCase()));
+  for (const t of settingsTypes) {
+    const tt = (t ?? "").trim();
+    if (tt && !seen.has(tt.toLowerCase())) {
+      ordered.push(prettyCat(tt));
+      seen.add(tt.toLowerCase());
+    }
+  }
+  // Keep "Other" last.
+  const others = ordered.filter((l) => l.toLowerCase() === "other");
+  const rest = ordered.filter((l) => l.toLowerCase() !== "other");
+  return [...rest, ...others];
+}
+
 export default async function ContactsPage({
   searchParams,
 }: {
@@ -108,6 +152,8 @@ export default async function ContactsPage({
   const enriched = all?.filter((c) => c.enrichedAt).length ?? 0;
   const vipCount = all?.filter((c) => c.highValue).length ?? 0;
   const promotedCount = all?.filter((c) => promotedIds.has(c.id)).length ?? 0;
+  // Tabs reflect the categories actually on the contacts (freq-ordered), not a static list.
+  const relCategories = deriveCategories(all, relationshipTypes);
 
   const q = (sp.q ?? "").toLowerCase();
   const rel = sp.rel ?? "";
@@ -231,7 +277,7 @@ export default async function ContactsPage({
       )}
 
       <Suspense fallback={<div className="mt-5 h-[88px]" />}>
-        <ContactsFilters enriched={enriched} vip={vipCount} promoted={promotedCount} categories={relationshipTypes} />
+        <ContactsFilters enriched={enriched} vip={vipCount} promoted={promotedCount} categories={relCategories} />
       </Suspense>
 
       {!all ? (
