@@ -1,9 +1,11 @@
-import { and, desc, eq, gte, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, isNull } from "drizzle-orm";
 import { db } from "@/db";
 import {
+  calendarEvents,
   claims,
   connectedAccounts,
   contacts,
+  interactions,
   notificationEvents,
   suggestions,
   userContext,
@@ -85,6 +87,73 @@ async function sendColdDigest(userId: string, email: string, slug: string): Prom
   console.log(`[brief:${slug}] sent actionable cold digest (${cold.length}) to ${email}`);
 }
 
+/**
+ * End-of-day meeting recap. For every calendar meeting with a known contact that ENDED today
+ * and hasn't been confirmed, ask "did it hold?" with one-tap Yes/No. Confirming logs it as a real
+ * touch (contact marked freshly contacted → quiet for weeks) — so the user never has to log a
+ * meeting manually, and we ask the same day while it's fresh instead of 2 weeks later.
+ * Returns how many confirmations we asked for. Night-brief only.
+ */
+async function confirmTodaysMeetings(userId: string, chatId: string): Promise<number> {
+  const now = Date.now();
+  const dayAgo = new Date(now - 26 * 3_600_000); // today-ish window (a little over 24h of slack)
+  const rows = await db
+    .select()
+    .from(calendarEvents)
+    .where(
+      and(
+        eq(calendarEvents.userId, userId),
+        isNotNull(calendarEvents.matchedContactId),
+        isNull(calendarEvents.held),
+        isNull(calendarEvents.confirmPromptedAt),
+        eq(calendarEvents.allDay, false),
+        gte(calendarEvents.startAt, dayAgo),
+      ),
+    )
+    .orderBy(desc(calendarEvents.startAt));
+
+  // Only meetings that have actually ended (use endAt, else assume ~1h). Cap so a heavy day
+  // doesn't flood Telegram; the rest get picked up on the next night brief.
+  const ended = rows
+    .filter((e) => {
+      const end = e.endAt ? new Date(e.endAt).getTime() : new Date(e.startAt).getTime() + 3_600_000;
+      return end < now;
+    })
+    .slice(0, 6);
+  if (!ended.length) return 0;
+
+  await sendMessage(
+    chatId,
+    `🌙 Before you wrap up — did ${ended.length === 1 ? "this meeting" : `these ${ended.length} meetings`} hold? One tap logs it so I keep their timeline right.`,
+    undefined,
+    { plain: true },
+  );
+
+  let asked = 0;
+  for (const e of ended) {
+    const c = e.matchedContactId
+      ? (await db.select().from(contacts).where(eq(contacts.id, e.matchedContactId)).limit(1))[0]
+      : undefined;
+    if (!c) continue;
+    const name = contactLink(c.name, c.linkedinUrl);
+    const title = e.title ? ` — ${htmlEscape(e.title)}` : "";
+    const when = shortDate(e.startAt);
+    await sendMessage(
+      chatId,
+      `📅 Did your meeting with ${name}${title}${when ? ` (${htmlEscape(when)})` : ""} hold?`,
+      [
+        { label: "✅ Yes, we met", data: `mheld:${e.id}` },
+        { label: "✕ Didn't happen", data: `mmiss:${e.id}` },
+      ],
+      { html: true },
+    );
+    await db.update(calendarEvents).set({ confirmPromptedAt: new Date() }).where(eq(calendarEvents.id, e.id));
+    asked++;
+  }
+  console.log(`[brief:night] asked ${asked} meeting confirmation(s) for ${userId}`);
+  return asked;
+}
+
 function startOfToday(): Date {
   const d = new Date();
   d.setHours(0, 0, 0, 0);
@@ -106,6 +175,19 @@ export async function runBrief(slug: string): Promise<void> {
   for (const u of us) {
     const ctx = (await db.select().from(userContext).where(eq(userContext.userId, u.id)).limit(1))[0];
     const maxNudges = ctx?.maxNudgesPerDay ?? 3;
+
+    // End-of-day: ask "did today's meetings hold?" so touches get logged same-day with one tap,
+    // independent of whether there are any pending suggestions to review.
+    if (slug === "night-brief") {
+      const chat = (
+        await db
+          .select({ ext: connectedAccounts.externalId })
+          .from(connectedAccounts)
+          .where(and(eq(connectedAccounts.userId, u.id), eq(connectedAccounts.provider, "telegram")))
+          .limit(1)
+      )[0]?.ext;
+      if (chat) await confirmTodaysMeetings(u.id, chat).catch((e) => console.error("[brief:night] confirm", e));
+    }
 
     const pending = await db
       .select()
@@ -152,10 +234,29 @@ export async function runBrief(slug: string): Promise<void> {
       suppressedCategories: suppressed,
     };
 
+    // Latest OUTBOUND time per contact — to drop nudges the user has already acted on.
+    const outRows = await db
+      .select({ contactId: interactions.contactId, at: interactions.occurredAt })
+      .from(interactions)
+      .where(and(eq(interactions.userId, u.id), eq(interactions.direction, "outbound"), isNotNull(interactions.contactId)))
+      .orderBy(desc(interactions.occurredAt));
+    const latestOut = new Map<string, number>();
+    for (const r of outRows) {
+      const cid = r.contactId;
+      if (cid && !latestOut.has(cid)) latestOut.set(cid, new Date(r.at).getTime());
+    }
+
     type Row = (typeof pending)[number] & { contact?: typeof contacts.$inferSelect };
     const passed: Row[] = [];
     for (const s of pending) {
       if (passed.length >= maxNudges) break;
+      // STALE-CHECK: if the user has reached out to this contact SINCE the nudge was generated, it's
+      // moot (they already handled it) — drop it so we never nudge about someone just contacted.
+      const reachedOutAt = s.contactId ? latestOut.get(s.contactId) : undefined;
+      if (reachedOutAt && reachedOutAt > new Date(s.createdAt).getTime()) {
+        await db.update(suggestions).set({ status: "dismissed", updatedAt: new Date() }).where(eq(suggestions.id, s.id));
+        continue;
+      }
       const contact = s.contactId
         ? (await db.select().from(contacts).where(eq(contacts.id, s.contactId)).limit(1))[0]
         : undefined;
@@ -213,17 +314,17 @@ export async function runBrief(slug: string): Promise<void> {
       // The name links to LinkedIn so the user can vet the contact before deciding to reach out.
       const name = contactLink(c?.name ?? "Contact", c?.linkedinUrl);
       const itemText = `${name}${meta ? ` — ${htmlEscape(meta)}` : ""}\n${htmlEscape(s.reason)}${htmlEscape(srcLine)}`;
-      const ok = await sendMessage(
-        tg.externalId,
-        itemText,
-        [
-          { label: "✍️ Reach out", data: `reach:${s.id}` },
-          { label: "😴 Snooze", data: `snooze:${s.id}` },
-          { label: "✕ Dismiss", data: `dismiss:${s.id}` },
-          { label: "🚫 Block", data: `block:${s.id}` },
-        ],
-        { html: true },
-      );
+      // For reconnect-type nudges, offer a zero-effort "we already spoke" so the user can log an
+      // off-channel meeting with one tap — which marks them contacted and quiets nudges for weeks.
+      const reconnectish = ["re_engage", "follow_up", "going_cold"].includes(s.triggerType);
+      const buttons = [
+        { label: "✍️ Reach out", data: `reach:${s.id}` },
+        ...(reconnectish ? [{ label: "✅ We spoke", data: `spoke:${s.id}` }] : []),
+        { label: "😴 Snooze", data: `snooze:${s.id}` },
+        { label: "✕ Dismiss", data: `dismiss:${s.id}` },
+        { label: "🚫 Block", data: `block:${s.id}` },
+      ];
+      const ok = await sendMessage(tg.externalId, itemText, buttons, { html: true });
       if (ok) {
         sent++;
         await db.insert(notificationEvents).values({

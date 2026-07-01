@@ -104,6 +104,8 @@ export async function ensureSchema(sql: {
   )`);
   await sql.unsafe(`CREATE INDEX IF NOT EXISTS "cal_user_start_idx" ON "calendar_events" ("user_id","start_at")`);
   await sql.unsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "cal_source_uq" ON "calendar_events" ("user_id","source_ref")`);
+  // Post-meeting "did it hold?" recap: track when we asked so we never double-prompt.
+  await sql.unsafe(`ALTER TABLE "calendar_events" ADD COLUMN IF NOT EXISTS "confirm_prompted_at" timestamptz`);
   // Manually blacklisted sender addresses (never tracked as conversations).
   await sql.unsafe(`ALTER TABLE "user_context" ADD COLUMN IF NOT EXISTS "blacklisted_emails" jsonb DEFAULT '[]'::jsonb`);
   // Per-situation voice guides learned from sent mail (reschedule, deal_share, catch_up, …).

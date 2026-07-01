@@ -264,6 +264,7 @@ export const calendarEvents = pgTable("calendar_events", {
   coldProspectId: uuid("cold_prospect_id"),
   held: boolean("held"), // null = pending confirmation, true = held, false = no-show
   heldConfirmedAt: timestamp("held_confirmed_at", { withTimezone: true }),
+  confirmPromptedAt: timestamp("confirm_prompted_at", { withTimezone: true }), // when Dexa asked "did it hold?"
   notes: text("notes"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

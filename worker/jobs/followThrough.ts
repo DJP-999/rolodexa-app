@@ -14,8 +14,8 @@ type Trigger = "reply" | "follow_up" | "going_cold";
 
 const DAY = 86_400_000;
 const REPLY_WINDOW_DAYS = 3; // a reply still worth surfacing
-const FOLLOWUP_MIN_DAYS = 4; // silence this long → nudge a follow-up
-const FOLLOWUP_MAX_DAYS = 21; // ...but past this it's stale, drop it
+const FOLLOWUP_MIN_DAYS = 14; // two weeks of silence before nudging a follow-up (avoid being pushy)
+const FOLLOWUP_MAX_DAYS = 28; // ...but past this it's stale, drop it
 const RELEVANCE_FLOOR = 35;
 const MAX_NEW_PER_RUN = 40; // bound LLM drafting cost
 const MAX_REPLY_PINGS_PER_RUN = 5; // immediate Telegram pings per run
@@ -174,7 +174,7 @@ export async function runFollowThrough(): Promise<void> {
         userId: c.userId,
         contactId: c.id,
         triggerType: "follow_up",
-        reason: `⏳ You messaged ${c.name} ${Math.round(silentDays)}d ago with no reply — follow up.`,
+        reason: `⏳ You reached out to ${c.name} ${Math.round(silentDays)}d ago with no reply on record. Did you two already connect, or want to follow up?`,
         draftMessage: message,
         intentLabel: "Follow up",
         priority: priorityOf(score),

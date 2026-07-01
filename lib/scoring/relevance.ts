@@ -52,13 +52,14 @@ export function recencySignal(lastDays: number | null, cadenceDays = 30): number
 }
 
 /**
- * Reconnect cadence by relevance. FLOOR IS ONE MONTH — never nudge to reach back out to someone
- * contacted more recently than ~30 days, even the highest-relevance contacts. Higher relevance
- * just means the shorter end of the 30→45-day range.
+ * Reconnect cadence by relevance. After a real touchpoint, people should be left alone for 1-2
+ * MONTHS — proactive "just checking in" reach-outs are only worth it occasionally; a genuine reason
+ * (news / milestone / job change / personal event) fires on its own regardless of this cadence.
+ * Higher relevance = the shorter end (~6 weeks); everyone else 2-3 months.
  */
 export function cadenceForRelevance(relevance: number | null): number {
-  if (relevance === null) return 45;
-  if (relevance >= 75) return 30;
-  if (relevance >= 50) return 38;
-  return 45;
+  if (relevance === null) return 60;
+  if (relevance >= 75) return 45;
+  if (relevance >= 50) return 60;
+  return 90;
 }

@@ -1,18 +1,21 @@
 import { NextResponse } from "next/server";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import {
   users,
   suggestions,
   contacts,
+  interactions,
   notificationEvents,
   connectedAccounts,
+  calendarEvents,
   messageLog,
 } from "@/db/schema";
 import { env } from "@/lib/env";
 import { answerCallback, finishCard, sendMessage } from "@/lib/integrations/telegram";
 import { deliverOutreach, resolveChannel } from "@/lib/outreach/deliver";
 import { SNOOZE_DAYS } from "@/lib/outreach/suppress";
+import { promoteColdProspect } from "@/lib/sync/track";
 import { APPROVE_BUTTONS, handleContactAction, handleDexaText, handleReminderAction, handleIntroAction } from "@/lib/agent/telegram";
 
 export const dynamic = "force-dynamic";
@@ -20,6 +23,7 @@ export const dynamic = "force-dynamic";
 const CONTACT_ACTIONS = ["reachC", "snoozeC", "dismissC", "blockC"];
 const REMINDER_ACTIONS = ["rmdone", "rmsnooze"];
 const INTRO_ACTIONS = ["introdraft", "introx"];
+const MEETING_ACTIONS = ["mheld", "mmiss"];
 
 async function setPendingEdit(userId: string, suggestionId: string | null): Promise<void> {
   const row = (
@@ -86,12 +90,90 @@ export async function POST(req: Request) {
         return NextResponse.json({ ok: true });
       }
 
+      // Meeting-confirm actions (from the end-of-day recap) operate on a calendar-event id.
+      // "Yes, we met" logs a real touch so the contact is marked freshly contacted (quiet for
+      // weeks) and any pending reconnect nudges for them are cleared — zero manual logging.
+      if (primaryUser && MEETING_ACTIONS.includes(action)) {
+        const ev = id
+          ? (await db.select().from(calendarEvents).where(eq(calendarEvents.id, id)).limit(1))[0]
+          : undefined;
+        if (!ev) {
+          await answerCallback(cb.id, "That meeting is no longer available.");
+          return NextResponse.json({ ok: true });
+        }
+        const now = new Date();
+        if (action === "mheld") {
+          await db
+            .update(calendarEvents)
+            .set({ held: true, heldConfirmedAt: now, confirmPromptedAt: ev.confirmPromptedAt ?? now, updatedAt: now })
+            .where(eq(calendarEvents.id, ev.id));
+          if (ev.matchedContactId) {
+            // Freshly contacted as of the meeting date → reconnect cadence (1-2 months) starts now.
+            await db
+              .update(contacts)
+              .set({ status: "active", lastContactedAt: ev.startAt })
+              .where(eq(contacts.id, ev.matchedContactId));
+            // Clear any pending reconnect-type nudges — we just confirmed a real touch.
+            await db
+              .update(suggestions)
+              .set({ status: "dismissed", updatedAt: now })
+              .where(
+                and(
+                  eq(suggestions.contactId, ev.matchedContactId),
+                  eq(suggestions.status, "pending"),
+                  inArray(suggestions.triggerType, ["re_engage", "follow_up", "going_cold"]),
+                ),
+              );
+          } else if (ev.coldProspectId) {
+            // A meeting that actually held promotes the prospect into the rolodex.
+            await promoteColdProspect(ev.coldProspectId).catch(() => undefined);
+          }
+          await answerCallback(cb.id, "Logged ✓ I'll give them some room now");
+          await finishCard(chatId, messageId, origText, "✅ Logged — meeting held");
+          return NextResponse.json({ ok: true });
+        }
+        // mmiss → didn't happen. Mark no-show; don't touch the relationship timeline.
+        await db
+          .update(calendarEvents)
+          .set({ held: false, heldConfirmedAt: now, updatedAt: now })
+          .where(eq(calendarEvents.id, ev.id));
+        await answerCallback(cb.id, "Marked as didn't happen ✓");
+        await finishCard(chatId, messageId, origText, "✕ Marked — didn't happen");
+        return NextResponse.json({ ok: true });
+      }
+
       const s = id
         ? (await db.select().from(suggestions).where(eq(suggestions.id, id)).limit(1))[0]
         : undefined;
 
       if (!s) {
         await answerCallback(cb.id, "That item is no longer available.");
+        return NextResponse.json({ ok: true });
+      }
+
+      // "✅ We spoke" — the user confirms they already connected (a call/meeting we couldn't see).
+      // Log it so the contact is marked freshly contacted and won't be nudged again for weeks.
+      if (action === "spoke") {
+        if (s.contactId) {
+          const now = new Date();
+          await db
+            .insert(interactions)
+            .values({
+              userId: s.userId,
+              contactId: s.contactId,
+              eventType: "meeting",
+              direction: null,
+              channel: "manual",
+              occurredAt: now,
+              sourceRef: `manual:${Date.now()}`,
+              metadata: { text: "connected (confirmed from a nudge)", kind: "meeting" },
+            })
+            .onConflictDoNothing();
+          await db.update(contacts).set({ status: "active", lastContactedAt: now }).where(eq(contacts.id, s.contactId));
+        }
+        await db.update(suggestions).set({ status: "dismissed", updatedAt: new Date() }).where(eq(suggestions.id, s.id));
+        await answerCallback(cb.id, "Logged — I'll give it a while ✓");
+        await finishCard(chatId, messageId, origText, "✅ Logged that you connected");
         return NextResponse.json({ ok: true });
       }
 
