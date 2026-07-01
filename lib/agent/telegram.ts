@@ -1,7 +1,8 @@
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { contacts, interactions, reminders, suggestions, userContext } from "@/db/schema";
-import { answerCallback, finishCard, sendMessage, type ApprovalButton } from "@/lib/integrations/telegram";
+import { contacts, interactions, intros, reminders, suggestions, userContext } from "@/db/schema";
+import { answerCallback, contactLink, finishCard, htmlEscape, sendMessage, type ApprovalButton } from "@/lib/integrations/telegram";
+import { findIntros } from "@/lib/intros/match";
 import { resolveChannel } from "@/lib/outreach/deliver";
 import { SNOOZE_DAYS } from "@/lib/outreach/suppress";
 import { buildAgentContext } from "@/lib/agent/context";
@@ -361,7 +362,111 @@ async function parseAndLogInteraction(userId: string, chatId: string, t: string)
     undefined,
     { plain: true },
   );
+  // After capturing the meeting, look for people worth introducing them to (fire-and-forget).
+  void suggestIntrosAfterMeeting(userId, contact, chatId, note);
   return true;
+}
+
+// ---- Mutual introductions (after a meeting) ------------------------------------------------
+
+/**
+ * After a meeting is logged, look across the network for people the user should INTRODUCE the
+ * met contact to — by shared domain/market/interest and proximity — and push the ideas to Telegram
+ * with one-tap "Draft intro" controls. Fire-and-forget; never blocks the log confirmation.
+ */
+async function suggestIntrosAfterMeeting(userId: string, a: Contact, chatId: string, aNote: string): Promise<void> {
+  try {
+    const all = await db.select().from(contacts).where(eq(contacts.userId, userId));
+    const matches = await findIntros(a, all, aNote, 3);
+    for (const m of matches) {
+      const exists = (
+        await db
+          .select({ id: intros.id })
+          .from(intros)
+          .where(and(eq(intros.userId, userId), eq(intros.fromContactId, a.id), eq(intros.toContactId, m.toContactId)))
+          .limit(1)
+      )[0];
+      if (exists) continue;
+      const row = (
+        await db
+          .insert(intros)
+          .values({ userId, fromContactId: a.id, toContactId: m.toContactId, reason: m.reason, basis: m.basis || null, score: m.score })
+          .onConflictDoNothing()
+          .returning({ id: intros.id })
+      )[0];
+      if (!row?.id) continue;
+      await sendMessage(
+        chatId,
+        `💡 Intro idea from your meeting with ${htmlEscape(a.name)}:\nConnect ${contactLink(a.name, a.linkedinUrl)} ↔ ${contactLink(m.toName, m.toLinkedin)}\n${htmlEscape(m.reason)}`,
+        [
+          { label: "✍️ Draft intro", data: `introdraft:${row.id}` },
+          { label: "✕ Dismiss", data: `introx:${row.id}` },
+        ],
+        { html: true },
+      );
+    }
+  } catch (e) {
+    console.error("[intros] suggestAfterMeeting", e);
+  }
+}
+
+/** Handle a tap on an intro card (✍️ Draft intro / ✕ Dismiss). */
+export async function handleIntroAction(
+  userId: string,
+  action: string,
+  introId: string,
+  chatId: string,
+  callbackId: string,
+  messageId?: number,
+  origText = "",
+): Promise<void> {
+  const row = (
+    await db.select().from(intros).where(and(eq(intros.id, introId), eq(intros.userId, userId))).limit(1)
+  )[0];
+  if (!row) {
+    await answerCallback(callbackId, "That intro is no longer available.");
+    return;
+  }
+  if (action === "introx") {
+    await db.update(intros).set({ status: "dismissed" }).where(eq(intros.id, introId));
+    await answerCallback(callbackId, "Dismissed ✓");
+    await finishCard(chatId, messageId, origText, "✕ Dismissed");
+    return;
+  }
+  // Draft a double-opt-in intro proposal the user can send.
+  const from = (await db.select().from(contacts).where(eq(contacts.id, row.fromContactId)).limit(1))[0];
+  const to = (await db.select().from(contacts).where(eq(contacts.id, row.toContactId)).limit(1))[0];
+  if (!from || !to) {
+    await answerCallback(callbackId, "A contact in this intro is missing.");
+    return;
+  }
+  await answerCallback(callbackId, "Drafting…");
+  const style = await getWritingStyleFor(userId, "catch_up");
+  const msg = await complete({
+    tier: "strong",
+    system:
+      "You write a short DOUBLE-OPT-IN introduction text AS THE USER (first person), to ONE of two people, proposing to connect them. " +
+      TONE_GUIDE +
+      " ASK if they'd be open to it (never assume). Name the other person and the SPECIFIC reason it's a fit. 1-3 sentences." +
+      (style ? `\n\nWrite in the user's own voice: ${style}` : ""),
+    messages: [
+      {
+        role: "user",
+        content: `Write a message to ${from.name} (${[from.role, from.company].filter(Boolean).join(", ")}) asking if they'd like an intro to ${to.name} (${[to.role, to.company].filter(Boolean).join(", ")}). Why it's a fit: ${row.reason}.`,
+      },
+    ],
+    maxTokens: 160,
+    temperature: 0.6,
+  });
+  const draftText = stripEmDashes((msg ?? "").trim()) || `Hey ${from.name.split(/\s+/)[0]}, I think you'd really hit it off with ${to.name}. Want me to connect you two?`;
+  await finishCard(chatId, messageId, origText, "✍️ Draft below");
+  await sendMessage(
+    chatId,
+    `Intro proposal to ${from.name}:\n\n${draftText}\n\n(Once they're in, loop ${to.name} in too.)`,
+    undefined,
+    { plain: true },
+  );
+  await db.update(intros).set({ status: "drafted" }).where(eq(intros.id, introId));
 }
 
 // ---- Free-text conversation + commands -----------------------------------------------------

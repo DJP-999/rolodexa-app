@@ -183,6 +183,20 @@ export async function ensureSchema(sql: {
     "sent_at" timestamptz
   )`);
   await sql.unsafe(`CREATE INDEX IF NOT EXISTS "reminders_status_due_idx" ON "reminders" ("status","due_at")`);
+  // Mutual-introduction suggestions.
+  await sql.unsafe(`CREATE TABLE IF NOT EXISTS "intros" (
+    "id" uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    "user_id" uuid NOT NULL,
+    "from_contact_id" uuid NOT NULL,
+    "to_contact_id" uuid NOT NULL,
+    "reason" text NOT NULL,
+    "basis" text,
+    "score" real,
+    "status" text DEFAULT 'pending',
+    "created_at" timestamptz NOT NULL DEFAULT now()
+  )`);
+  await sql.unsafe(`CREATE INDEX IF NOT EXISTS "intros_user_status_idx" ON "intros" ("user_id","status")`);
+  await sql.unsafe(`CREATE UNIQUE INDEX IF NOT EXISTS "intros_pair_uq" ON "intros" ("user_id","from_contact_id","to_contact_id")`);
   // New trigger types: personal touches + the follow-through / going-cold engine.
   for (const v of ["work_anniversary", "birthday", "personal_event", "reply", "follow_up", "going_cold"]) {
     await sql.unsafe(`ALTER TYPE "trigger_type" ADD VALUE IF NOT EXISTS '${v}'`);

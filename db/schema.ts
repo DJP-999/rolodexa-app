@@ -189,6 +189,22 @@ export const reminders = pgTable("reminders", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   sentAt: timestamp("sent_at", { withTimezone: true }),
 }, (t) => ({ dueIdx: index("reminders_status_due_idx").on(t.status, t.dueAt) }));
+// Mutual-introduction suggestions: connect two people in the network who'd benefit from meeting
+// (shared domain/market, complementary needs, or proximity). Surfaced after a meeting is logged.
+export const intros = pgTable("intros", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),
+  fromContactId: uuid("from_contact_id").references(() => contacts.id, { onDelete: "cascade" }).notNull(),
+  toContactId: uuid("to_contact_id").references(() => contacts.id, { onDelete: "cascade" }).notNull(),
+  reason: text("reason").notNull(), // the mutual benefit, one line
+  basis: text("basis"), // e.g. "shared: real estate; same city: Austin"
+  score: real("score"),
+  status: text("status").default("pending"), // pending | drafted | dismissed
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({
+  introUserStatus: index("intros_user_status_idx").on(t.userId, t.status),
+  introPairUq: uniqueIndex("intros_pair_uq").on(t.userId, t.fromContactId, t.toContactId),
+}));
 export const notificationEvents = pgTable("notification_events", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }).notNull(),

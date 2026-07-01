@@ -13,12 +13,13 @@ import { env } from "@/lib/env";
 import { answerCallback, finishCard, sendMessage } from "@/lib/integrations/telegram";
 import { deliverOutreach, resolveChannel } from "@/lib/outreach/deliver";
 import { SNOOZE_DAYS } from "@/lib/outreach/suppress";
-import { APPROVE_BUTTONS, handleContactAction, handleDexaText, handleReminderAction } from "@/lib/agent/telegram";
+import { APPROVE_BUTTONS, handleContactAction, handleDexaText, handleReminderAction, handleIntroAction } from "@/lib/agent/telegram";
 
 export const dynamic = "force-dynamic";
 
 const CONTACT_ACTIONS = ["reachC", "snoozeC", "dismissC", "blockC"];
 const REMINDER_ACTIONS = ["rmdone", "rmsnooze"];
+const INTRO_ACTIONS = ["introdraft", "introx"];
 
 async function setPendingEdit(userId: string, suggestionId: string | null): Promise<void> {
   const row = (
@@ -76,6 +77,12 @@ export async function POST(req: Request) {
       // Reminder-card actions (✅ Done / ⏰ Tomorrow) operate on a reminder id.
       if (primaryUser && REMINDER_ACTIONS.includes(action)) {
         await handleReminderAction(primaryUser.id, action, id, chatId, cb.id, messageId, origText);
+        return NextResponse.json({ ok: true });
+      }
+
+      // Intro-card actions (✍️ Draft intro / ✕ Dismiss) operate on an intro id.
+      if (primaryUser && INTRO_ACTIONS.includes(action)) {
+        await handleIntroAction(primaryUser.id, action, id, chatId, cb.id, messageId, origText);
         return NextResponse.json({ ok: true });
       }
 
